@@ -4,10 +4,12 @@
 [Casper](https://github.com/)
 and [Marcus](https://github.com/)*.
 
-Cassandra is an AP system, meaning that they deprioritize consistency in favour for availability and partition tolerance. 
+Cassandra is known for being an AP system, meaning it prioritizes availability and partition tolerance over strong consistency. However, Cassandra still offers options to achieve stronger consistency, such as tunable consistency and lightweight transactions. This raises questions about what guarantees these consistency settings provide and whether Cassandra's claims about consistency hold up under scrutiny.
+
+To evaluate Cassandra's consistency guarantees, we conducted three tests using Jepsen, a distributed systems testing tool. First, we tested the isolation levels provided by Cassandra's lightweight transactions. Second, we tested the consistency models achievable with Cassandra's tunable consistency. Finally, we tested whether Cassandra's consistency is sufficient to pass a Jepsen bank account transfer test. By performing these tests, we aimed to better understand the strengths and limitations of Cassandra's consistency model and its implications for applications that rely on strong consistency.
 
 # What is Cassandra?
-*This part should fulfill the criteria: "Explanation of the targeted concurrency model"*
+*This part should fulfill the criteria: "Explanation of the targeted concurrency model - all details of the system with clear justification"*
 
 ## Short overview
 Regarding the CAP theorem, Cassandra is an AP system. This means it prioritizes availability and partition tolerance over consistency.
@@ -17,7 +19,7 @@ Regarding the CAP theorem, Cassandra is an AP system. This means it prioritizes 
 ## Architecture (focus on Dynamo)
 *What we mention in this section depends on what exactly we test*
 
-TODO:
+**TODO**:
 - dataset partitioning using consistent hashing (do we need to write about this?)
     - token ring
     - last-write-wins element-set conflict-free replicated data type for each CQL row
@@ -54,38 +56,33 @@ LWTs in Cassandra provide stronger consistency guarantees than the eventual cons
 
 But how does the LWTs work in more detail? The LWTs are implemented using the Paxos consensus protocol, and a light weight transaction consists of four phases: prepare and promise, read existing values, propose and accept, and commit. 
 
-According to Cassandra's documentation, the LWT is a serial transaction. 
+**TODO**: Write about Paxos in more detail. And include the non-determinism.  
 
-
-Explain how LWT are implemented using Paxos:
-- provides linearizable concistency
-- according to Cassandra's documentation, this means serializability (serial transaction in ACID context)
-- CAS (compare and set operation)
-- Four phases:
-1. Prepare and promise
-2. Read existing value
-3. Propose and accept
-4. Commit
+**TODO**: Write something about that according to Cassandra's documentation, the LWT is a serial transaction, but it is not? Or at least mentioning this depending on what our tests shows. 
  
 Address nondeternism regarding lwt:
--https://faun.pub/cassandra-light-weight-transactions-busted-229e0633c8b here it says that 
+- https://faun.pub/cassandra-light-weight-transactions-busted-229e0633c8b here it says that 
 "LWT may result in a non-deterministic state"
+- https://issues.apache.org/jira/browse/CASSANDRA-9328 here is a issue thread talking about LWTs non-deterministic behaviour
 - under contention, it's possible mutation operations succeeds, but the client might receive an exception which results in the interpretation and could cause serious ramifactions
 
 # Non-deternism
-Either include this in other sections, or have its own section here
+*Rubric: Explanation of sources of nondeterminism addressed (All sources of nondeterminism with clear examples)*
+
+Either include this in other sections, or have its own section here.
 
 Some ideas of what we can mention here (however, we should probably only mention the things that are relevant to what we test):
-- Last write wins principle? Because we don't know which write will succeed. According to the original Jepsen article: "... (last write wins principle) destroys information nondeterministically"
+- Last write wins principle? Because we don't know which write will succeed. According to the original Jepsen article: "... (last write wins principle) destroys information nondeterministically". Maybe we can have a test (when we don't have strong consistency) that shows 
 - Maybe something regarding isolation of transactions. According to original Jepsen article Cassandra allows even dirty write, meaning it has the lowest isolation level. 
 - Repairs?
-- LWT, see above
+- LWT, see section above
+- What happens during failures? This article: https://www.yugabyte.com/blog/apache-cassandra-lightweight-transactions-secondary-indexes-tunable-consistency/ says: "However, writes that fail because only a partial set of replicas are updated could lead to two different readers seeing two different values of data." when talking about quorum consistency. 
 
 # Related work
 
-- Rubric: Analysis of the technique in compared to related work (Sufficient discussion of pros and cons of the studied approach compared to 5+ related work)
+*Rubric: Analysis of the technique in compared to related work (Sufficient discussion of pros and cons of the studied approach compared to 5+ related work)*
 
-TODO:
+**TODO**:
 1. Original Jepsen test of Cassandra
 2. Datastax's/scalar's tests
 3. Look at the reports that were cited in the lectures
@@ -93,8 +90,11 @@ TODO:
 Option is also to combine this inside other sections. 
 
 # Tests
+*Rubric: Explanation of the bug detection technique  (Explanation of the bug detection technique (10 pts)	Satisfying explanation of the algorithm, its implementation architecture, applicability to benchmarks, implementation limitations and possible extensions	Sufficient explanation of the algorithm, its implementation architecture, applicability to benchmarks, implementation limitations	Sufficient explanation of the algorithm and its implementation architecture	Lacks detail, just enough explanation of the algorithm and its implementation architecture)*
 
-TODO: Change structure depending on tests performed and which results we get.
+*Rubric: Empirical evaluation results (Sufficient level of experimental results with a few different configurations of parameters, in comparison to more than one baselines)*
+
+**TODO**: Change structure depending on tests performed and which results we get.
 
 ## Test setup
 
@@ -136,12 +136,12 @@ A test cluster is set up with 5 docker containers and 1 control docker container
 
 # Results
 
-TODO:
+**TODO**:
 - some cool graphs and tables
 
 # Conclusion
 
-TODO:
+**TODO**:
 - Summary
 - Future
 
