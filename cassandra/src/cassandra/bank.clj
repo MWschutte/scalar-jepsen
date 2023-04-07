@@ -2,15 +2,20 @@
   (:require [cassandra.core :refer :all]
             [cassandra.conductors :as conductors]
             [clojure.tools.logging :refer [debug info warn]]
+            [clojure.core.reducers :as r]
             [jepsen
              [client :as client]
              [checker :as checker]
              [generator :as gen]
              ]
             [jepsen.tests.bank :as bank]
+            [jepsen.checker.timeline :as timeline]
             [qbits.alia :as alia]
             [qbits.hayt.dsl.clause :refer :all]
-            [qbits.hayt.dsl.statement :refer :all])
+            [qbits.hayt.dsl.statement :refer :all]
+            [knossos.model :as model]
+            [knossos.op :as op]
+            )
   (:import (clojure.lang ExceptionInfo)))
 
 
@@ -30,17 +35,20 @@
         (create-my-table session {:keyspace "jepsen_keyspace"
                                   :table "bat"
                                   :schema {:pid         :int
+                                            :id         :int
                                            :value        :counter
-                                           :primary-key :pid}})
+                                           :primary-key [:pid, :id]}})
                                            
         (Thread/sleep 100)
         (info "adding initial balance")
         (dotimes [i n]
           (Thread/sleep 500)
           (info "Creating account" i)
+          ;; (alia/execute session (update :bat 
+          ;;                         (values [[:pid 1] [:id i]])))
           (alia/execute session (update :bat
                                        (set-columns {:value [+ starting-balance]})
-                                       (where [[= :pid i]]))
+                                       (where [[= :pid 1] [= :id i]]))
                                        {:consistency  :all})
       ))))
 
@@ -53,25 +61,14 @@
                 (warn (str "from " from " to " to" amount " amount))
                (alia/execute session
                               (str "BEGIN COUNTER BATCH "
-                                  "UPDATE bat SET value = value + " amount " WHERE pid = " from "; "
-                                  "UPDATE bat SET value = value - " amount " WHERE pid = " to " IF value>"amount";"
+                                  "UPDATE bat SET value = value + " amount " WHERE pid = 1 and id = " from "; "
+                                  "UPDATE bat SET value = value - " amount " WHERE pid = 1 and id =" to ";"
                                   "APPLY BATCH;")
                              {:consistency :quorum})
                (assoc op :type :ok)))
-        :read (let [results (alia/execute session
-                                          (select :bat)
-                                          {:consistency :all})
-                    value-a (->> results
-                                 (filter (fn [ret] (= (:cid ret) 0)))
-                                 (map :value)
-                                 (into (sorted-set)))
-                    value-b (->> results
-                                 (filter (fn [ret] (= (:cid ret) 1)))
-                                 (map :value)
-                                 (into (sorted-set)))]
-                (if (= value-a value-b)
-                  (assoc op :type :ok :value value-a)
-                  (assoc op :type :fail :value [value-a value-b]))))
+        :read (->> (alia/execute session (select :bat) {:consistency :all})
+                    (mapv :value)
+                    (assoc op :type :ok, :value)))
 
       (catch ExceptionInfo e
         (handle-exception op e))))
@@ -81,6 +78,35 @@
 
   (teardown! [_ _]))
 
+(defn bank-checker
+  "Balances must sum to the model's total. 
+  Nonneggative cannot be guaranteed since counters and ltw are not supported"
+  [model]
+  (reify checker/Checker
+    (check [this test history opts]
+      (let [bad-reads (->> history
+                           (r/filter op/ok?)
+                           (r/filter #(= :read (:f %)))
+                           (r/map (fn [op]
+                                    (let [balances (:value op)]
+                                      (cond (not= (:n model) (count balances))
+                                            {:type :wrong-n
+                                             :expected (:n model)
+                                             :found    (count balances)
+                                             :op       op}
+
+                                            (not= (:total model)
+                                                  (reduce + balances))
+                                            {:type :wrong-total
+                                             :expected (:total model)
+                                             :found    (reduce + balances)
+                                             :op       op}
+                                            ))))
+                           (r/filter identity)
+                           (into []))]
+        {:valid? (empty? bad-reads)
+         :bad-reads bad-reads}))))
+
 (defn bank-test
   [opts]
   (merge (cassandra-test (str "bank-set-" (:suffix opts))
@@ -88,7 +114,10 @@
                           :total-amount  100
                           :accounts      (vec (range 8))
                           :client    (->BankSetClient (atom false) nil nil 8 10)
-                          :checker   (checker/set)
+                          :checker   (checker/compose
+                                    {:perf    (checker/perf)
+                                      :timeline (timeline/html)
+                                      :details (bank-checker {:total 80 :n 8})})
                           :generator (gen/phases
                                       (->> [(bank/generator)]
                                            (conductors/std-gen opts))
