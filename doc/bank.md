@@ -53,9 +53,32 @@ Jepsen throws the following exception during during evaluation:
      :value [101 -26 145 80 134 -116 -44 -189],
      :index 21471}}
 ```
-Lets
+The reads seem to observe the database in an inconsistent state.
+To understand what is going on here lets go back to the guarantees that cassandra gives us for batched operations.  
+Remember that the batched updates only guarantee isolation for transactions within the same partition. 
+In Cassandra the values are hashed to the first part of the primary key. 
+Note that however the last read int the history:
+```
+2	:ok	:read	[-246 -236 -87 153 393 -74 -73 250]
+```
+Does sum to 80. This demonstrates the eventual consistency property of cassandra nicely. In other words, no mony was lost during the transactions. The transactions executed atomic.
 
-However since the batch counters do not guarantee Isolation, they only provide atomicity this is a state that we are allowed to observe cassandra to be in as long as the transactions are still in progress. However after all transactions are processed we should observe consistent state. So as long as the last read is okay there was no mony lost.
+We can  expand the schema to ensure that all the bank accounts are located in the same partition. We do this by adding a partition key to the primary key. The new schedule would be the following:
+
+```sql
+CREATE TABLE test.t (
+    id int,
+    pid int, 
+    value counter
+      PRIMARY KEY (pid, id)
+)
+```
+Then if we ensure all the ```pid```'s to be equal (for instance 1) we ensure the all the bank accounts to be mapped to the same partition.
+If we run this slightly adopted version of the tests again we get:
+```
+Everything looks good! ヽ(‘ー`)ノ
+```
+We verify that the counter batch operates in atomicity and isolation as promised by cassandra.
 
 ### Introducing Nemesis
 Lets see if the batch counter keeps its atomicity when we introduce failure into the system.
