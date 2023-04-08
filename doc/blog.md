@@ -14,29 +14,42 @@ Overall, by examining both the consistency guarantees in the context of the CAP 
 
 # Test setup
 
-The code is forked from .. A test cluster is set up with 5 docker containers and 1 control docker container. The machines run Ubuntu 20.04. Cassandra version 3.x is used. See the README.md in the Github repository for a detailed explanation of the setup. 
+Our Github repository is forked from [Scalar-labs's repository](https://github.com/scalar-labs/scalar-jepsen). A test cluster is set up with 5 docker containers and 1 control docker container. The machines run Ubuntu 20.04. Cassandra version 3.x is used. See the README.md in our Github repository for a detailed explanation of the setup. 
 
 ## Jepsen
 
-- short description
-- histories are generated
-- checkers such as Knossos (linearizability) and Gretchen (serializability)
+In this project we have used the testing framework [Jepsen](https://github.com/jepsen-io/jepsen). Jepsen is a testing tool created by Kyle Kingsbury to analyze the consistency and reliability of distributed databases under various failure scenarios. Jepsen works by subjecting the database system to a series of tests that simulate real-world network and hardware failures, such as node crashes, network partitions, and message loss.
+
+Jepsen aims to find issues in database systems that could cause data loss, data corruption, or violations of the system's consistency guarantees, such as linearizability or serializability. It does this by running a suite of tests that exercise different aspects of the database system's behavior, such as reads, writes, updates, and concurrent transactions.
+
+Jepsen tests generate histories, and checkers are then used to verify the correctness of the histories against a formal model of the expected behaviour. In this project we have used [Knossos](https://github.com/jepsen-io/knossos), which checks for linearizable consistency, and [Gretchen](https://github.com/aphyr/gretchen), which checks if the history is serializable. Additionally, we have adapted some of the checkers found in the Jepsen Github repository. 
 
 # Consistency guarantees
 
-**TODO - Theory:**
-- CAP theorem - Cassandra guarantees eventual consistency
-- Tunable consistency
-- Replication - how data is replicated to nodes
-- Last write wins policy using timestamps - show example of when this results in nondeternism
+*Change this section depending on what we in the end choose to test and the results we get*
 
-**TODO - Related research:**
-- Jepsen's test showed that acknowledged writes were lost even though strong consistency was used.
+As said, Cassandra is an AP system, meaning that it sacrifices consistency for availability and partition tolerance. The consistency model Cassandra provides is therefore only eventual consistency, meaning that after a write operation, all read requests will eventually return the most recent value, but there may be a delay due to replication and network latency. In other words, eventual consistency means the data will eventually become consistent, but not necessarily immediately. However, Cassandra provides tunable consistency levels that allow developers to select the degree of consistency required for their applications. Casandra even claims when using Quorum consistency levels or higher that strong consistency can be achieved, meaning that any read operation returns the most recent write. Specifically, strong consistency is claimed to be achieved when R + W > RF, where R = Consistency level for read operations, W = Consistency level for write operations, and RF = Replication factor. To verify this claim, let's look more into how Cassandra's replication work and how Cassandra handles concurrent conflicts with last write wins policy (**TODO**: maybe explain the last write win in more detail?) with an example.
+
+The following example is taken from [Scott Logic](https://blog.scottlogic.com/2017/10/06/cassandra-eventual-consistency.html). We have a 5-node system and have a replication factor of 3, which means that the data is replicated to three different nodes in the cluster. This ensures that even if one or two nodes in the cluster fail, the data is still available and can be retrieved from the remaining nodes. Let's set both the read and write consistency levels to QUORUM, meaning that a write needs to happen in at least 2 replica nodes before an acknowledgement is returned, and the same for read.
+
+First, a client sends a write request. The coordinator finds out which nodes are the primary and the two replicas. The writes are acknowledged by primary and replica 1 but not by replica 2. Then a read request is initiated, and the coordinator tries to read replica 1 and replica 2. These nodes have inconsistent data, but Cassandra solves this by using last write wins policy. It does this by comparing the timestamp of the entries, and will see that replica 1 has the latest data. It will therefore return the latest data, and the strong consistency is fulfilled. 
+
+But the question now is, is R + W > RF always fulfilling strong consistency? Can it sometimes result in inconsistencies? What happens for example during node failure? 
 
 **TODO - Tests:**
-- Verfiying strong consistency - show that inconsistency can happen during node failure
+- Verfiying strong consistency - show that inconsistency can happen during node failure (in this article they show examples of when strong consistency do not hold https://blog.scottlogic.com/2017/10/06/cassandra-eventual-consistency.html)
+- Maybe test with other nemesesis as well? 
+- Maybe also test with Knossos and see what it is that fails. Probably however it will only show that some updates are lost. 
 
-# Transactional guarantees
+When researching Cassandra's strong consistency, we also found that inconsistencies during node failure is not the only issue with the strong consistency. Another issue that can happen is lost writes. Kyle Kingsbury tested Cassandra 2.0.0 in 2013, and tested among others the strong consistency. He found that when fulfilling R + W > RF and mutating the same cell repeatedly, 28% of the commited updates were lost. What is the reason for this? 
+
+Let's explain the problem with an example again. 
+
+The following example is taken from https://stackoverflow.com/a/73752024. The equation R + W > RF is fulfilled, and we have two clients that want to update a record at the same time, for example they want to increase a value with 100. Both clients read the current value as 10, and they both decide to increase it with 100. Both clients write 110 to the nodes (how many is specified by W), resulting in that any node will have the maximum value of 110. This would mean that we have lost one update of increasing with 100. In other words, strong consistency does guarantee that the most recent write value is read by any read operation. However, it does not prevent lost updates, which Kyle Kingsbury proved in his test.
+
+Instead, to prevent the lost updates we need to somehow serialize the operations. To see if Cassandra offers serializability, let's look into Cassandra's transaction guarantees. 
+
+# Transaction guarantees
 
 **TODO - Theory:**
 - LWT implementation - Paxos four phases
