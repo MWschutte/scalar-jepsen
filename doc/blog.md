@@ -1,8 +1,8 @@
 # Verifying consistency guarantees in Cassandra:
 
-*By [Emilia Rieschel](https://github.com/rieschel),
-[Casper](https://github.com/)
-and [Marcus](https://github.com/)*.
+*By [Casper Henkes](https://github.com/),
+[Marcus Schutte](https://github.com/),
+[Emilia Rieschel](https://github.com/rieschel).*
 
 Cassandra is a popular database utilized by numerous large enterprises, including Netflix, Apple, and eBay. One might assume that the consistency of Cassandra has been thoroughly tested and validated. However, as a distributed database that prioritizes availability and partition-tolerance over consistency, encountering consistency issues in Cassandra is a common occurrence. In fact, during our research, we came across comments such as "I am completely discouraged. Is there any workaround for this? If LWT and CAS cannot be used on non-idempotent operations, what is the real use case of the current implementation?" and "To put it simply, Cassandra row isolation is probabilistic at best." Therefore, we delved into the details of Cassandra's consistency guarantees to assess and validate them.
 
@@ -28,37 +28,58 @@ Jepsen tests generate histories, and checkers are then used to verify the correc
 
 *Change this section depending on what we in the end choose to test and the results we get*
 
-As said, Cassandra is an AP system, meaning that it sacrifices consistency for availability and partition tolerance. The consistency model Cassandra provides is therefore only eventual consistency, meaning that after a write operation, all read requests will eventually return the most recent value, but there may be a delay due to replication and network latency. In other words, eventual consistency means the data will eventually become consistent, but not necessarily immediately. However, Cassandra provides tunable consistency levels that allow developers to select the degree of consistency required for their applications. Casandra even claims when using Quorum consistency levels or higher that strong consistency can be achieved, meaning that any read operation returns the most recent write. Specifically, strong consistency is claimed to be achieved when R + W > RF, where R = Consistency level for read operations, W = Consistency level for write operations, and RF = Replication factor. To verify this claim, let's look more into how Cassandra's replication work and how Cassandra handles concurrent conflicts with last write wins policy (**TODO**: maybe explain the last write win in more detail?) with an example.
+As said, Cassandra is an AP system, meaning that it sacrifices consistency for availability and partition tolerance. The consistency model Cassandra provides is therefore only eventual consistency, meaning that after a write operation, all read requests will eventually return the most recent value, but there may be a delay due to replication and network latency. In other words, eventual consistency means the data will eventually become consistent, but not necessarily immediately. However, Cassandra provides tunable consistency levels that allow developers to select the degree of consistency required for their applications. Casandra even claims when using Quorum consistency levels or higher that strong consistency can be achieved, meaning that any read operation returns the most recent write. Specifically, strong consistency is claimed to be achieved when R + W > RF, where R = Consistency level for read operations, W = Consistency level for write operations, and RF = Replication factor. To verify this claim, let's look more into how Cassandra's replication work and how Cassandra handles concurrent conflicts with last write wins policy (**TODO**: maybe explain the last write win policy in more detail?) with an example:
 
-The following example is taken from [Scott Logic](https://blog.scottlogic.com/2017/10/06/cassandra-eventual-consistency.html). We have a 5-node system and have a replication factor of 3, which means that the data is replicated to three different nodes in the cluster. This ensures that even if one or two nodes in the cluster fail, the data is still available and can be retrieved from the remaining nodes. Let's set both the read and write consistency levels to QUORUM, meaning that a write needs to happen in at least 2 replica nodes before an acknowledgement is returned, and the same for read.
+> The following example is taken from [Scott Logic](https://blog.scottlogic.com/2017/10/06/cassandra-eventual-consistency.html). We have a 5-node system and have a replication factor of 3, which means that the data is replicated to three different nodes in the cluster. This ensures that even if one or two nodes in the cluster fail, the data is still available and can be retrieved from the remaining nodes. Let's set both the read and write consistency levels to QUORUM, meaning that a write needs to happen in at least 2 replica nodes before an acknowledgement is returned, and the same for read.
+>
+> First, a client sends a write request. The coordinator finds out which nodes are the primary and the two replicas. The writes are acknowledged by primary and replica 1 but not by replica 2. Then a read request is initiated, and the coordinator tries to read replica 1 and replica 2. These nodes have inconsistent data, but Cassandra solves this by using last write wins policy. It does this by comparing the timestamp of the entries, and will see that replica 1 has the latest data. It will therefore return the latest data, and the strong consistency is fulfilled. 
 
-First, a client sends a write request. The coordinator finds out which nodes are the primary and the two replicas. The writes are acknowledged by primary and replica 1 but not by replica 2. Then a read request is initiated, and the coordinator tries to read replica 1 and replica 2. These nodes have inconsistent data, but Cassandra solves this by using last write wins policy. It does this by comparing the timestamp of the entries, and will see that replica 1 has the latest data. It will therefore return the latest data, and the strong consistency is fulfilled. 
+> **TODO:** What I am not sure about is what happens when the write and read happens concurrently. Because then the read should probably return not the latest write (and therefore not fulfilling strong consistency?), but also the latest write is not acknowledged yet? So then it does not count as an inconsistency? Also, this seems maybe to be solved by read repair and reconciliation. Maybe this article explains how read repair is used: https://betterprogramming.pub/cassandra-consistency-guaranties-c8338e051879. 
 
 But the question now is, is R + W > RF always fulfilling strong consistency? Can it sometimes result in inconsistencies? What happens for example during node failure? 
 
-**TODO - Tests:**
-- Verfiying strong consistency - show that inconsistency can happen during node failure (in this article they show examples of when strong consistency do not hold https://blog.scottlogic.com/2017/10/06/cassandra-eventual-consistency.html)
-- Maybe test with other nemesesis as well? 
-- Maybe also test with Knossos and see what it is that fails. Probably however it will only show that some updates are lost. 
+> **TODO - Tests:**
+> - Verfiying strong consistency - show that inconsistency can happen during node failure (in this article they show examples of when strong consistency do not hold https://blog.scottlogic.com/2017/10/06/cassandra-eventual-consistency.html)
+> - Maybe test with other nemesesis as well? 
+> - Maybe also test with Knossos and see what it is that fails. Probably however it will only show that some updates are lost. 
 
-When researching Cassandra's strong consistency, we also found that inconsistencies during node failure is not the only issue with the strong consistency. Another issue that can happen is lost writes. Kyle Kingsbury tested Cassandra 2.0.0 in 2013, and tested among others the strong consistency. He found that when fulfilling R + W > RF and mutating the same cell repeatedly, 28% of the commited updates were lost. What is the reason for this? 
+When researching Cassandra's strong consistency, we also found that inconsistencies during node failure is not the only issue with the strong consistency. Another issue that can happen is lost writes. [Kyle Kingsbury tested Cassandra 2.0.0 in 2013](https://aphyr.com/posts/294-jepsen-cassandra), and tested among others the strong consistency. He found that when fulfilling R + W > RF and mutating the same cell repeatedly, 28% of the commited updates were lost. What is the reason for this? 
 
-Let's explain the problem with an example again. 
+Let's explain the problem with an example again:
 
-The following example is taken from https://stackoverflow.com/a/73752024. The equation R + W > RF is fulfilled, and we have two clients that want to update a record at the same time, for example they want to increase a value with 100. Both clients read the current value as 10, and they both decide to increase it with 100. Both clients write 110 to the nodes (how many is specified by W), resulting in that any node will have the maximum value of 110. This would mean that we have lost one update of increasing with 100. In other words, strong consistency does guarantee that the most recent write value is read by any read operation. However, it does not prevent lost updates, which Kyle Kingsbury proved in his test.
+> The following example is taken from https://stackoverflow.com/a/73752024. The equation R + W > RF is fulfilled, and we have two clients that want to update a record at the same time, for example they want to increase a value with 100. Both clients read the current value as 10, and they both decide to increase it with 100. Both clients write 110 to the nodes (how many is specified by W), resulting in that any node will have the maximum value of 110. This would mean that we have lost one update of increasing with 100. In other words, strong consistency does guarantee that the most recent write value is read by any read operation. However, it does not prevent lost updates, which Kyle Kingsbury proved in his test.
 
-Instead, to prevent the lost updates we need to somehow serialize the operations. To see if Cassandra offers serializability, let's look into Cassandra's transaction guarantees. 
+Instead, to prevent the lost updates we need to somehow serialize the operations. To see if Cassandra offers serializability, let's look into Cassandra's transactional guarantees. 
 
-# Transaction guarantees
+# Transactional guarantees
 
-**TODO - Theory:**
-- LWT implementation - Paxos four phases
-- ACID - what does Cassandra guarantee (atomicity and isolation)
-- Dataset partitioning - explain why isolation guarantees for single partition and not multiple
+Cassandra's standard operations do not provide full ACID (Atomicity, Consistency, Isolation, Durability) transactional guarantees. However, Cassandra has introduced additional features to provide some ACID guarantees: lightweight transactions and batched writes. Lightweight transactions (LWTs) in Cassandra provide atomicity and isolation guarantees on a single partition. This is achieved through a compare-and-set (CAS) mechanism, where write operations are only performed if a certain condition is met. This ensures that only one client can successfully modify a particular row, preventing conflicts and maintaining data consistency. Batch writes in Cassandra guarantee atomicity, meaning that all writes within a batch will either succeed or fail together.
 
-**TODO - Related work:**
-- Find some paper/previous Jepsen test that implemented a bank transaction
-- Jepsen's testing: they tested LWTs and reasoned about Cassandra allowing P0
+To understand in more detail how isolation is achieved with LWTs, it's necessary to examine how LWTs are implemented in Cassandra.
+
+LWTs are implemented using Paxos consensus protocol. As described by [Datastax](https://www.datastax.com/blog/lightweight-transactions-cassandra-20) Paxos concensus protocol consists of two phases: prepare/promise and propose/accept:
+
+![Paxos phases](paxos.png)
+
+1. Prepare/promise: A node proposes a value; this node is called the leader. Several nodes may try to act as leaders simultaneously, meaning that a leader node in this case is different than a "master" node. The leader chooses a ballot number and sends it to the replicas involved. If the ballot number is the highest one seen by a replica, it promises not to accept any proposals linked to previous ballot numbers and shares the most up-to-date proposal it has received.
+
+2. Propose/accept: After the prepare/promise phase is completed successfully, the leader can send a proposal to the replicas for acceptance. The proposal contains the value the leader wants to commit to the replicated state machine, along with the ballot number that was chosen in the prepare/promise phase. To ensure that the proposal is accepted, the leader must receive acknowledgments from a majority of the replicas. When a replica receives the proposal, it checks the ballot number to ensure that it is the same as the one it received during the prepare/promise phase. If the ballot number matches, the replica accepts the proposal and sends an acknowledgment to the leader. Once the leader receives acknowledgments from a majority of the replicas, the proposal is accepted and committed to the replicated state machine. If the leader does not receive acknowledgments from a majority of the replicas, it must choose a new ballot number and start the prepare/promise phase again. This is necessary to prevent stale replicas from accepting old proposals that are no longer valid.
+
+Using Paxos, LWTs get the ability to agree on exactly one proposal. Since LWT is exposed in Cassandra as a compare-and-set operation, a phase where the current value of the row is read neads to be added. Additionally, the write needs to be commited and acknowledged as well. This results in that LWT are implemented at the cost of four round trips:
+
+![Lightweigth transactions](lwt.png)
+
+Of this explanation, we understand that isolation of the LWTs is achieved by using Paxos and thereby get the ability to agree on exactly one proposal. The question then is, is this enough to guarantee the highest isolation level, serializability? Serializability requires that the execution of a set of transactions in a concurrent system be equivalent to some serial execution of those transactions. Let's test Cassandra's LWT's serializability using Gretchen:
+
+> **TODO:**: Testing lightweight transactions with Gretchen (serializability). Here we want to test both on a single partition and multiple partition, and probably get that serializability is achieved when testing on single partition, and is failing when testing on multiple. Also we should explain here, or before, how data partioning in Cassandra works.
+
+Regarding consistency model, LWTs are guaranteed to achieve linearizability, meaning that sequential consistency is achieved with a time-constraint. This guarantee was tested by [Kyle Kingsbury in 2013](https://aphyr.com/posts/294-call-me-maybe-cassandra). At that time, LWT were a new feature of Cassandra 2.0.0, and several issues were found by Kyle. Among others, it was found that 1-5% of the acknowledged writes were dropped, and the cause seemed to be a broken implementation of Paxos. 
+
+Since we are running our tests on Cassandra 3.x it would be interesting to see if the issues found 2013 are now resolved, and if we can find other issues with the LWT as well.
+
+> **TODO:** Testing lightweight transactions with Knossos. Here we probably will find that everything works fine. 
+
+Finally, we want to perform a final test on Cassandra's transactional guarantees. Are Cassandra's transactional guarantees provided by the LWT and batch operations, enough to make sure that no money is lost during a bank transaction?
 
 ## Bank transaction
 
@@ -68,7 +89,7 @@ A transactional workload that is often used to test consistency of a database is
 A bank account could be represented as an integer. A transaction must be atomic. For a mony transfer, mony needs to be subtracted from one account and then added to another one. If there is a failure half way the transaction should roll back. Otherwise mony will be lost. In order for the account to be nonnegative a constraint must be added in the transaction that if the transfer amount is less than the bank account the transaction should fail.
 
 ### Cassandra guarantees
-The question is: does cassandra give sufficient transactional guaranties to implement the bank test. Using ```batch```, ```counter``` and light weight transactions (```ltw```) as building blocks is should be possible to build a bank test with mony transfer. 
+The question is: does cassandra give sufficient transactional guaranties to implement the bank test. Using ```batch```, ```counter``` and light weight transactions (```ltw```) as building blocks is should be possible to build a bank test with money transfer. 
 
 The ```batch``` statement [guarantees atomicity and isolation within a single partition](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/cqlBatch.html). the ```counter``` datatype supports [addition and subtracting](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/counter_type.html). Finally, using ```ltw``` a [compare and set operation](https://docs.datastax.com/en/drivers/python/3.2/lwt.html) allows us to check if there is enough mony in the account for a transfer. 
 
