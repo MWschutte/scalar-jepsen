@@ -86,9 +86,9 @@ Since we are running our tests on Cassandra 3.x it would be interesting to see i
 > **TODO:** Testing lightweight transactions with Knossos. Here we probably will find that everything works fine. 
 
 > **TODO** - Sources of nondeternism
-> LWTs retry logic - LWTs ensure that only one client can update the same row at a time, and gives a "condition not met" error to the other clients which results in that they do a retry. What happens when multiple clients try to retry again? Is the correct order still maintained? 
-> Node failures - what happens for example when the coordinator node fails? What can the different results be depending on in which of paxos phases we are in?
-> In LWTs, a timeouterror can be received even though the write was sucessful, resulting in that you never know 100% if a update was sucessful or not. You can also not read the value again, to see if the update worked, because another client may have updatet the value at the same time. More information about this here: https://betterprogramming.pub/cassandra-consistency-guaranties-c8338e051879 and here: https://issues.apache.org/jira/browse/CASSANDRA-9328. 
+> - LWTs retry logic - LWTs ensure that only one client can update the same row at a time, and gives a "condition not met" error to the other clients which results in that they do a retry. What happens when multiple clients try to retry again? Is the correct order still maintained? 
+> - Node failures - what happens for example when the coordinator node fails? What can the different results be depending on in which of paxos phases we are in?
+> - In LWTs, a timeouterror can be received even though the write was sucessful, resulting in that you never know 100% if a update was sucessful or not. You can also not read the value again, to see if the update worked, because another client may have updatet the value at the same time. More information about this here: https://betterprogramming.pub/cassandra-consistency-guaranties-c8338e051879 and here: https://issues.apache.org/jira/browse/CASSANDRA-9328. 
 
 Finally, we want to perform a final test on Cassandra's transactional guarantees. Are Cassandra's transactional guarantees provided by the LWT and batch operations, enough to make sure that no money is lost during a bank transaction?
 
