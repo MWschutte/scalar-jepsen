@@ -32,25 +32,39 @@ Jepsen tests generate histories, and checkers are then used to verify the correc
 > **TODO - Discuss results:**
 > - Create a diagram showing what happens during the tests, and why we can get inconsistencies during node failure (if we got some)
 > - Maybe show the histories if possible
-> - NONDETERNISM: probably enough with just discussing causes for the inconsistencies we see? Also, explain why last write wins policy can cause lost updates (no isolation), and reference to Kyle's testing.
+> - NON-DETERNISM: probably enough with just discussing causes for the inconsistencies we see? Also, explain why last write wins policy can cause lost updates (no isolation), and reference to Kyle's testing.
 
 # Testing LWT's consistency with different consistency levels
 Cassandra offers the following consistency levels: ANY, ONE, TWO, THREE, QUORUM, Serial (only for read consistency).
 
 > **TODO - Tests:**
-> - Testing LWTs for linearizability when having different read consistency levels
+> - Testing LWTs for linearizability when having different read consistency levels (we could compare this with earlier work of Datastax and Kyle, where they only tested the linearizability of LWT but not the implementation of the LWT)
+> - We can also just test the guarantee of LWTs fulfilling linearizability (very basic test but still a bit interesting for the report). If we do it, we can then also compare it to Kyle's testing in 2013. In thas case, we could write something like:
+>
+>As said, LWTs are guaranteed to achieve linearizability, meaning that sequential consistency is achieved with a time-constraint. This guarantee was tested by [Kyle Kingsbury in 2013](https://aphyr.com/posts/294-call-me-maybe-cassandra). At that time, LWT were a new feature of Cassandra 2.0.0, and several issues were found by Kyle. Among others, it was found that 1-5% of the acknowledged writes were dropped, and the cause seemed to be a broken implementation of Paxos. 
+>
+>Since we are running our tests on Cassandra 3.11 it would be interesting to see if the issues found 2013 are now resolved, and if we can find other issues with the LWT as well.
+>
+>We tested this by ... 
+
+> **TODO - Discuss results:**
+> - Maybe create a table showing for which consistency levels we found issues
+> - Try to explain what this issues can be causes by, among others explain why LWT need serial consistency 
+> - NON-DETERNISM: What happens during node failure in the LWT transactions? What is the cause to why we find issues in the tests sometimes for some consistency levels but not always?
 
 ## Bank transaction
+
+**TODO:** In order to compare our studied approach we could motivate shortly why this test tests the consistency of batch operations more thoroughly than the batch operation in the Scalar-lab. 
 
 A transactional workload that is often used to test consistency of a database is the bank test. In a bank test mony transfers between bank accounts are simulated. For these transactions it is of course important that there is no mony lost during transfer. Moreover bank accounts have the simple constraint that they are not allowed to have a negative amount in the bank.
 
 ### Requirements
-A bank account could be represented as an integer. A transaction must be atomic. For a mony transfer, mony needs to be subtracted from one account and then added to another one. If there is a failure half way the transaction should roll back. Otherwise mony will be lost. In order for the account to be nonnegative a constraint must be added in the transaction that if the transfer amount is less than the bank account the transaction should fail.
+A bank account could be represented as an integer. A transaction must be atomic. For a money transfer, money needs to be subtracted from one account and then added to another one. If there is a failure half way the transaction should roll back. Otherwise money will be lost. In order for the account to be non-negative a constraint must be added in the transaction that if the transfer amount is less than the bank account the transaction should fail.
 
 ### Cassandra guarantees
-The question is: does cassandra give sufficient transactional guaranties to implement the bank test. Using ```batch```, ```counter``` and light weight transactions (```ltw```) as building blocks is should be possible to build a bank test with money transfer. 
+The question is: does cassandra give sufficient transactional guaranties to implement the bank test. Using ```batch```, ```counter``` and lightweight transactions (```ltw```) as building blocks is should be possible to build a bank test with money transfer. 
 
-The ```batch``` statement [guarantees atomicity and isolation within a single partition](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/cqlBatch.html). the ```counter``` datatype supports [addition and subtracting](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/counter_type.html). Finally, using ```ltw``` a [compare and set operation](https://docs.datastax.com/en/drivers/python/3.2/lwt.html) allows us to check if there is enough mony in the account for a transfer. 
+The ```batch``` statement [guarantees atomicity and isolation within a single partition](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/cqlBatch.html). the ```counter``` datatype supports [addition and subtracting](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/counter_type.html). Finally, using ```ltw``` a [compare and set operation](https://docs.datastax.com/en/drivers/python/3.2/lwt.html) allows us to check if there is enough money in the account for a transfer. 
 
 Create the following table: 
 ```sql
@@ -69,7 +83,7 @@ Then combining the three building blocks gives our potential bank transfer:
         "IF value > "amount";"
     "APPLY BATCH;" ))
 ```
-However running this query gives an error unfortunatly:
+However running this query gives an error unfortunately:
 
 >Conditions on counters are not supported
 
