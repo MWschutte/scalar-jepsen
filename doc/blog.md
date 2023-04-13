@@ -22,6 +22,25 @@ In this project we have used the testing framework [Jepsen](https://github.com/j
 
 Jepsen tests generate histories, and checkers are then used to verify the correctness of the histories against a formal model of the expected behaviour. In our project, we used the [Knossos checker](https://github.com/jepsen-io/knossos), which implements the [Wing and Gong](https://doi.org/10.1006/jpdc.1993.1015)  linearizability checker, to test for linearizable consistency. Although [Porcupine](https://github.com/anishathalye/porcupine) is another checker that could be used for testing linearizability, we chose Knossos because previous Cassandra testing had been performed using it and because it is easily integrated with Jepsen. We also adapted some of the checkers found in the Jepsen Github repository for our bank transaction test.
 
+# Nondeternism
+*Change the following (and add more details) depending on exactly what we are testing*
+
+Since Cassandra is a distributed system that prioritizes availability and partition tolerance over consistency, there are several factors that can cause nondeternism to our tests. First of all, we are inserting faults during the tests and have used both network partitioning and temporarily suspending nodes.
+
+- Network partitioning: When partioning the network into two subclusters, inconsistencies between the clusters can happen. For example, if a write happens in one of the subclusters, the other subcluster will not have the latest write. This means, if we perform a read, we won't know if it will get the most recent data or not. (TODO: look into hinted handoff, because apparently Cassandra is using the to handle writes that occur during network partitions. However, Cassandra should not have anything that handle reads during network partitions as I have understood it)
+
+- Temporarily suspending nodes: The effects of suspending the nodes will depend, but can cause nondeternism if it disrupts the replication phase. For example, if a write request is made to a suspended node the data will not be propagated to the other nodes until the node is brought back online. In the meantime, a read request may be made to the other nodes, and it may then return an outdated version of the data that does not reflect the changes made to the suspended node. But if the node was suspended after that the data was replicated to all the nodes, the read would return the most recent write data. 
+
+Secondly, not only inserting faults in the tests can cause nondeternism, but also Cassandra by design. For example, Cassandra's conflict handling can cause nondeternism during concurrent writes:
+
+- Concurrent writes without using lwt: Concurrent writes in Cassandra can cause nondeterminism because multiple clients can simultaneously issue write requests to update the same data row with different values, and it's not guaranteed which write request will be applied first. Additionally, the writes could have the same timestamp, and then the lexically bigger value will be chosen.
+
+Finally, Cassandra offers the tunable consistency to balance between consistency and availability. If availability is prioritized by using low conistency levels or low replication factor, this can resuls in nondeternism:
+
+- Low consistency levels: For example if setting consistency level to ONE, two read queries can give different data if one node has the latest write and the other one has not received it yet. 
+
+- Low replication factor: For example if RF is set to 1, and the node with the data becomes unavailable somehow in one read query, two read queries for the same data could give back different results.
+
 # Testing strong consistency guarantees during node failure
 
 > **TODO - Tests:**
@@ -52,7 +71,7 @@ Cassandra offers the following consistency levels: ANY, ONE, TWO, THREE, QUORUM,
 > - Try to explain what this issues can be causes by, among others explain why LWT need serial consistency 
 > - NON-DETERNISM: What happens during node failure in the LWT transactions? What is the cause to why we find issues in the tests sometimes for some consistency levels but not always?
 
-## Bank transaction
+# Bank transaction
 
 **TODO:** In order to compare our studied approach we could motivate shortly why this test tests the consistency of batch operations more thoroughly than the batch operation in the Scalar-lab. 
 
