@@ -118,11 +118,13 @@
                                     {:perf    (checker/perf)
                                       :timeline (timeline/html)
                                       :details (bank-checker {:total 80 :n 8})})
-                          :generator (gen/phases
-                                      (->> [(bank/generator)]
-                                           (conductors/std-gen opts))
-                                      (conductors/terminate-nemesis opts)
-                                      ; read after waiting for batchlog replay
-                                      (gen/sleep 60)
-                                      (read-once))})
+                          :generator (->>
+                                        (gen/stagger 1/100 (bank/generator))
+                                        (gen/nemesis
+                                        (cycle [(gen/sleep 5)
+                                                {:type :info, :f :start}
+                                                (gen/sleep 5)
+                                                {:type :info, :f :stop}]))
+                                        (gen/time-limit (:time-limit opts)))
+                                      })
          opts))
