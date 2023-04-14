@@ -54,5 +54,18 @@ EOF"
 
 ```sh
 $ cd ${SCALAR_JEPSEN}/cassandra
+commands
+  nemesis
+    none
+    flush
+    bridge
+    halves
+    isolation
+    crash
+
 $ lein run test --test lwt --ssh-private-key ~/.ssh/id_rsa
+
+$ lein run test --test lwt --nemesis none --ssh-private-key ~/.ssh/id_rsa
+
+$ lein run test --test lwt --nemesis crash --ssh-private-key ~/.ssh/id_rsa
 ```

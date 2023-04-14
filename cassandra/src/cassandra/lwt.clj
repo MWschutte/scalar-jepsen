@@ -1,6 +1,7 @@
 (ns cassandra.lwt
   (:require [cassandra.core :refer :all]
             [cassandra.conductors :as conductors]
+            [cassandra.nemesis :as nemesis]
             [clojure.tools.logging :refer [debug info warn]]
             [jepsen
              [checker :as checker]
@@ -71,7 +72,7 @@
         :read (let [id (key (:value op))
                     v (->> (alia/execute session
                                          (select :lwt (where [[= :id id]]))
-                                         {:consistency :serial})
+                                         {:consistency :SERIAL})
                            first
                            :value)]
                 (assoc op :type :ok
@@ -98,13 +99,8 @@
                                            (:concurrency opts)
                                            (range)
                                            (fn [_]
-                                             (->> (gen/reserve
-                                                    (quot (:concurrency opts) 2)
-                                                    r
-                                                    (gen/mix [w cas cas]))
-                                                  (gen/limit 100)
+                                             (->> (gen/repeat(gen/mix [r w r cas r]))
+                                                  (gen/limit 1)
                                                   (gen/process-limit (:concurrency opts)))))
-                                          (gen/nemesis
-                                           (conductors/mix-failure-seq opts))
                                           (gen/time-limit (:time-limit opts)))})
          opts))
