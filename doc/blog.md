@@ -162,4 +162,5 @@ Lets see if the batch counter keeps its atomicity when we introduce failure into
 **TODO:**
 - Summarize results
 - Implications
-- Future 
+
+To extend the work we could perform the tests on newer versions of Cassandra, for example version 4.0. Additionally, we could further investigate the transactional guarantees of Cassandra, for example by testing the lightweight transaction for serializability. For such tests using the [Gretchen](https://github.com/aphyr/gretchen) checker would be relevant, which checks for serializability.
