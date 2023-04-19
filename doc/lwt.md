@@ -32,9 +32,9 @@ At first found that the tests tend to run quite a few commands on the same node 
 
 Tests are not consistent (probably because of the nemesis or the seed used for the sequence generators)
 
-TODO
-- More operations.
-- More CAS and Write.
-- Concurrent CAS and Write operations.
-- Rerun all tests.
-- Different nemesis.
+
+Changed test to be more consistent with how it generates operations. Which gives basically the same result as the original test but is easier to change and operate.
+
+Adding different nemesis does not seem to matter for the working of the system that much.
+
+seems there might be something weird / wrong with the test nemesis..

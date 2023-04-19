@@ -48,13 +48,11 @@ $ sudo sh -c "cat << EOF >> /etc/hosts
 <NODE4_IP> n4
 <NODE5_IP> n5
 EOF"
-```
+``
 
 7. Run a test on the control machine
 
-```sh
-$ cd ${SCALAR_JEPSEN}/cassandra
-commands
+possible command options commands
   nemesis
     none
     flush
@@ -63,9 +61,10 @@ commands
     isolation
     crash
 
-$ lein run test --test lwt --ssh-private-key ~/.ssh/id_rsa
+```sh
+$ cd ${SCALAR_JEPSEN}/cassandra
 
-$ lein run test --test lwt --nemesis none --ssh-private-key ~/.ssh/id_rsa
+$ lein run test --test lwt --ssh-private-key ~/.ssh/id_rsa
 
 $ lein run test --test lwt --nemesis crash --ssh-private-key ~/.ssh/id_rsa
 ```
