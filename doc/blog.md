@@ -73,48 +73,23 @@ Cassandra offers the following consistency levels: ANY, ONE, TWO, THREE, QUORUM,
 > - NON-DETERNISM: What happens during node failure in the LWT transactions? What is the cause to why we find issues in the tests sometimes for some consistency levels but not always?
 
 # Testing atomicity and isolation in the bank transaction scenario
-
 **TODO:** In order to compare our studied approach we could motivate shortly why this test tests the consistency of batch operations more thoroughly than the batch operation in the Scalar-lab. 
 
-A transactional workload that is often used to test consistency of a database is the bank test. In a bank test mony transfers between bank accounts are simulated. For these transactions it is of course important that there is no mony lost during transfer. Moreover bank accounts have the simple constraint that they are not allowed to have a negative amount in the bank.
+Cassandra gives no linearizability/serializability guarantees except for in the light weight transactions. However lightweight transactions are only supported within a row. But cassandra does guarentee strong consistency in terms of CAP theorem and it provides atomicity and isolation with batched transactions. 
+With these building blocks we try to implement bank transactions.
 
-### Requirements
-A bank account could be represented as an integer. A transaction must be atomic. For a money transfer, money needs to be subtracted from one account and then added to another one. If there is a failure half way the transaction should roll back. Otherwise money will be lost. In order for the account to be non-negative a constraint must be added in the transaction that if the transfer amount is less than the bank account the transaction should fail.
+## Requirements.
+We use the cassandra [counter](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/counter_type.html#:~:text=Counter%20type-,A%20counter%20column%20value%20is%20a%2064%2Dbit%20signed%20integer,two%20operations%3A%20increment%20and%20decrement.) data type to represent the bank account. This allows us to increment and decrement the bank account value. We use cassandra [counter batch] (https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/cqlBatch.html) since it guarantees atomicity and isolation within a single partition. Idealy we would use light weight transactions to make sure bank account values remain positive. But counter batches are [idempotent](https://cassandra.apache.org/doc/latest/cassandra/cql/dml.html#counter-batches). And [lightweight transactions do not suppport idempotent datat types](https://docs.datastax.com/en/developer/java-driver/3.1/manual/idempotence/). So we drop the constraints that bank transactions have to be nonegative.
 
-### Cassandra guarantees
-The question is: does cassandra give sufficient transactional guaranties to implement the bank test. Using ```batch```, ```counter``` and lightweight transactions (```ltw```) as building blocks is should be possible to build a bank test with money transfer. 
+## test setup
+The workload consist of reads of all bank accounts with consistency level all and counter batches mony is transfered from one account to another. The reads read the total state of the database. There are 8 accounts in total and they start of with 10 credit in each account. The reads read the total state of the databsae and are expected to return a total amount of 80 credit summing the ammount in all accounts. After the transactions are done the test times out for 60 seconds and reads one more time to observe the final state. 
 
-The ```batch``` statement [guarantees atomicity and isolation within a single partition](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/cqlBatch.html). the ```counter``` datatype supports [addition and subtracting](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/counter_type.html). Finally, using ```ltw``` a [compare and set operation](https://docs.datastax.com/en/drivers/python/3.2/lwt.html) allows us to check if there is enough money in the account for a transfer. 
+The bank transaction test are setup in twoo different ways. Cpnfiguration 1) the bank accounts live on multiple partitions. Configuration two) the accounts live on one partition. Cassandra does not provide isolation in batches when data is located at muliple partitions. 
 
-Create the following table: 
-```sql
-CREATE TABLE test.t (
-    id int PRIMARY KEY,
-    value counter
-)
-```
-Then combining the three building blocks gives our potential bank transfer:
+## Results
+The results of the two configurations are as follows:
 
-```clojure
- (defn transfer [from, to, amount] 
-    (str "BEGIN COUNTER BATCH "
-    "UPDATE bat SET value = value + " amount " WHERE pid = " from "; "
-    "UPDATE bat SET value = value - " amount " WHERE pid = " to 
-        "IF value > "amount";"
-    "APPLY BATCH;" ))
-```
-However running this query gives an error unfortunately:
-
->Conditions on counters are not supported
-
-And if we look closer in Cassandras [cql documentation for counter batch](https://cassandra.apache.org/doc/latest/cassandra/cql/dml.html#counter-batches) we see that counters are not [idempotent](https://docs.datastax.com/en/glossary/docs/index.html#idempotent). Cassandra uses (a modified version) of Paxos for compare and set. If a Paxos round fails to commit the operation will be replayed next round but replaying a counter addition would result in a new value. Light weight transactions only support idempotent data types.
-
-So we drop the constraint that bank accounts have to be non-negative an proceed with the test. We can still expect no mony to be lost in the transfer. The checker checks for every read operation if the total of te balances of every read operation is equal to the expected total.
-
-After running:
-``` bash
-lein run test --test bank
-```
+### Configuration 1: Bank accounts on mulitple partitions
 Jepsen throws the following exception during during evaluation:
 ```clojure
 {:type :wrong-total,
@@ -128,34 +103,21 @@ Jepsen throws the following exception during during evaluation:
      :value [101 -26 145 80 134 -116 -44 -189],
      :index 21471}}
 ```
-The reads seem to observe the database in an inconsistent state.
-To understand what is going on here lets go back to the guarantees that cassandra gives us for batched operations.  
-Remember that the batched updates only guarantee isolation for transactions within the same partition. 
-In Cassandra the values are hashed to the first part of the primary key. 
-Note that however the last read int the history:
+This is to be expected since with this configurations Cassandra does not provide isolation. A read can happen when a counter batch is only half way in progress resulting to read of an inconsistent state. However the last read of the database reads as shown bellow:
+
 ```
 2	:ok	:read	[-246 -236 -87 153 393 -74 -73 250]
 ```
-Does sum to 80. This demonstrates the eventual consistency property of cassandra nicely. In other words, no mony was lost during the transactions. The transactions executed atomic.
+Here all the accounts sum to 80 total again. This gives a good example of Cassandras eventual consistency at play.
 
-We can  expand the schema to ensure that all the bank accounts are located in the same partition. We do this by adding a partition key to the primary key. The new schedule would be the following:
-
-```sql
-CREATE TABLE test.t (
-    id int,
-    pid int, 
-    value counter
-      PRIMARY KEY (pid, id)
-)
-```
-Then if we ensure all the ```pid```'s to be equal (for instance 1) we ensure the all the bank accounts to be mapped to the same partition.
-If we run this slightly adopted version of the tests again we get:
+### Configuration 2: All Bank accounts on one partition.
+As expected all the reads observe conssitent state of the database. Jepsn outputs:
 ```
 Everything looks good! ヽ(‘ー`)ノ
 ```
 We verify that the counter batch operates in atomicity and isolation as promised by cassandra.
 
-### Introducing Nemesis
+### Configuration 2) Introducing Nemesis
 Lets see if the batch counter keeps its atomicity when we introduce failure into the system.
 
 # Conclusion
