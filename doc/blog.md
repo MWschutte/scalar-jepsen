@@ -117,8 +117,10 @@ Everything looks good! ヽ(‘ー`)ノ
 ```
 We verify that the counter batch operates in atomicity and isolation as promised by cassandra.
 
-### Configuration 2) Introducing Nemesis
+### Introducing nemesis to Configuration 2
 Lets see if the batch counter keeps its atomicity when we introduce failure into the system.
+In the picture below a latency plot of the bank transactions is shown for when crash nemesis was added to the test. Altough it results in more transfers failing. There are no exceptions thrown. Similar results are observed for the bridge nemesis.
+![bank set crash](https://github.com/MWschutte/scalar-jepsen/blob/blog_post/doc/latency-raw-bank-set-crash-bootstrap.png?raw=true)
 
 # Conclusion
 **TODO:**
