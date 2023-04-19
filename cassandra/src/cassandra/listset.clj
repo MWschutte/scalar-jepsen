@@ -47,9 +47,11 @@
                              "WHERE id = 0;")
                              {:consistency :quorum})
                (assoc op :type :ok))
-         :read (let [results (alia/execute session (select :list_table (where [[= :id 0]])) {:consistency :all})]
-                    (warn results)
-                    (assoc op :type :ok :value [results :data]))
+         :read (->> (alia/execute session (select :list_table (where [[= :id 0]])) {:consistency :all})
+                    (mapv :data)
+                    first 
+                    (into (sorted-set))
+                    (assoc op :type :ok ,:value))
                   )
 
       (catch ExceptionInfo e
