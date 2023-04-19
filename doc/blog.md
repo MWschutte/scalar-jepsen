@@ -73,24 +73,25 @@ Cassandra offers the following consistency levels: ANY, ONE, TWO, THREE, QUORUM,
 > - NON-DETERNISM: What happens during node failure in the LWT transactions? What is the cause to why we find issues in the tests sometimes for some consistency levels but not always?
 
 # Testing atomicity and isolation in the bank transaction scenario
-**TODO:** In order to compare our studied approach we could motivate shortly why this test tests the consistency of batch operations more thoroughly than the batch operation in the Scalar-lab. 
-
-Cassandra gives no linearizability/serializability guarantees except for in the light weight transactions. However lightweight transactions are only supported within a row. But cassandra does guarentee strong consistency in terms of CAP theorem and it provides atomicity and isolation with batched transactions. 
-With these building blocks we try to implement bank transactions.
+Cassandra gives no linearizability/serializability guarantees except for in the lightweight transactions. However, lightweight transactions are only supported within a row. But cassandra does guarentee "strong consistency" in terms of the CAP theorem and it provides atomicity and isolation with batched transactions. 
+With these building blocks we try to implement bank transactions. (TODO: not relevant to mention CAP theorem?)
 
 ## Requirements.
-We use the cassandra [counter](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/counter_type.html#:~:text=Counter%20type-,A%20counter%20column%20value%20is%20a%2064%2Dbit%20signed%20integer,two%20operations%3A%20increment%20and%20decrement.) data type to represent the bank account. This allows us to increment and decrement the bank account value. We use cassandra [counter batch] (https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/cqlBatch.html) since it guarantees atomicity and isolation within a single partition. Idealy we would use light weight transactions to make sure bank account values remain positive. But counter batches are [idempotent](https://cassandra.apache.org/doc/latest/cassandra/cql/dml.html#counter-batches). And [lightweight transactions do not suppport idempotent datat types](https://docs.datastax.com/en/developer/java-driver/3.1/manual/idempotence/). So we drop the constraints that bank transactions have to be nonegative.
+We use the cassandra [counter](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/counter_type.html#:~:text=Counter%20type-,A%20counter%20column%20value%20is%20a%2064%2Dbit%20signed%20integer,two%20operations%3A%20increment%20and%20decrement.) data type to represent the bank account. This allows us to increment and decrement the bank account value. We use cassandra [counter batch](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/cqlBatch.html) since it guarantees atomicity and isolation within a single partition. Ideally, we would use lightweight transactions to make sure bank account values remain positive, but counter batches are [idempotent](https://cassandra.apache.org/doc/latest/cassandra/cql/dml.html#counter-batches), and [lightweight transactions do not suppport idempotent data types](https://docs.datastax.com/en/developer/java-driver/3.1/manual/idempotence/). Therefore, we drop the constraint that bank transactions have to be non-negative.
 
-## test setup
-The workload consist of reads of all bank accounts with consistency level all and counter batches mony is transfered from one account to another. The reads read the total state of the database. There are 8 accounts in total and they start of with 10 credit in each account. The reads read the total state of the databsae and are expected to return a total amount of 80 credit summing the ammount in all accounts. After the transactions are done the test times out for 60 seconds and reads one more time to observe the final state. 
+## Test setup
+The workload consist of read operations, which read all bank accounts with consistency level ALL, and of counter batches, which transfer money from one account to another. The reads read the total state of the database. There are 8 accounts in total and they start with 10 credits in each account. The reads read the total state of the database and are expected to return a total amount of 80 credits summing the ammount in all accounts. After the transactions are done the test times out for 60 seconds and reads one more time to observe the final state. 
 
-The bank transaction test are setup in twoo different ways. Cpnfiguration 1) the bank accounts live on multiple partitions. Configuration two) the accounts live on one partition. Cassandra does not provide isolation in batches when data is located at muliple partitions. 
+The bank transaction test are set up in two different ways:
+- Configuration 1: the bank accounts live on multiple partitions. 
+- Configuration 2: the bank accounts live on one partition. 
+Cassandra does not provide isolation in batches when data is located at muliple partitions. 
 
 ## Results
 The results of the two configurations are as follows:
 
-### Configuration 1: Bank accounts on mulitple partitions
-Jepsen throws the following exception during during evaluation:
+### Configuration 1: Bank accounts on multiple partitions
+Jepsen throws the following exception during evaluation:
 ```clojure
 {:type :wrong-total,
     :expected 80,
@@ -103,15 +104,15 @@ Jepsen throws the following exception during during evaluation:
      :value [101 -26 145 80 134 -116 -44 -189],
      :index 21471}}
 ```
-This is to be expected since with this configurations Cassandra does not provide isolation. A read can happen when a counter batch is only half way in progress resulting to read of an inconsistent state. However the last read of the database reads as shown bellow:
+This is to be expected since with this configuration Cassandra does not provide isolation. This means, that a read can happen when a counter batch is only half way in progress, resulting in reading an inconsistent state. However, the last read of the database reads as shown bellow:
 
 ```
 2	:ok	:read	[-246 -236 -87 153 393 -74 -73 250]
 ```
-Here all the accounts sum to 80 total again. This gives a good example of Cassandras eventual consistency at play.
+Here all the accounts sum to 80 total again. This gives a good example of Cassandras eventual consistency at play. (TODO: Is this an example of eventual consistency, or only example of atomicity and isolation?)
 
 ### Configuration 2: All Bank accounts on one partition.
-As expected all the reads observe conssitent state of the database. Jepsn outputs:
+As expected all the reads observe consistent state of the database. Jepsen outputs:
 ```
 Everything looks good! ヽ(‘ー`)ノ
 ```
@@ -119,7 +120,7 @@ We verify that the counter batch operates in atomicity and isolation as promised
 
 ### Introducing nemesis to Configuration 2
 Lets see if the batch counter keeps its atomicity when we introduce failure into the system.
-In the picture below a latency plot of the bank transactions is shown for when crash nemesis was added to the test. Altough it results in more transfers failing. There are no exceptions thrown. Similar results are observed for the bridge nemesis.
+In the picture below a latency plot of the bank transactions is shown for when crash nemesis was added to the test. Although it results in more transfers failing, there are no exceptions thrown. Similar results are observed for the bridge nemesis.
 ![bank set crash](https://github.com/MWschutte/scalar-jepsen/blob/blog_post/doc/latency-raw-bank-set-crash-bootstrap.png?raw=true)
 
 # Conclusion
