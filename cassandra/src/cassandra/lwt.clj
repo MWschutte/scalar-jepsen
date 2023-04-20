@@ -72,7 +72,7 @@
         :read (let [id (key (:value op))
                     v (->> (alia/execute session
                                          (select :lwt (where [[= :id id]]))
-                                         {:consistency :SERIAL})
+                                         {:consistency :serial})
                            first
                            :value)]
                 (assoc op :type :ok
@@ -94,13 +94,22 @@
                                       (checker/compose
                                        {:timeline (timeline/html)
                                         :linear (checker/linearizable
-                                                 {:model (model/cas-register)})}))
-                          :generator (->> (independent/concurrent-generator
-                                           (:concurrency opts)
-                                           (range)
-                                           (fn [_]
-                                             (->> (gen/repeat(gen/mix [r w r cas r]))
-                                                  (gen/limit 1)
-                                                  (gen/process-limit (:concurrency opts)))))
-                                          (gen/time-limit (:time-limit opts)))})
-         opts))
+                                                 {:model (model/cas-register)})
+                                        }))
+                                        :generator (->> 
+                                          (independent/concurrent-generator
+                                            (:concurrency opts)
+                                            (range)
+                                            (fn [_]
+                                              (->> 
+                                                (gen/repeat(gen/mix [r w r cas r]))
+                                                (gen/limit 1)
+                                                (gen/process-limit (:concurrency opts)))))
+                                          (gen/nemesis
+                                            (cycle [(gen/sleep 5)
+                                              {:type :info, :f :start}
+                                              (gen/sleep 5)
+                                              {:type :info, :f :stop}]))
+                                          (gen/time-limit (:time-limit opts))
+                                        )})
+    opts))
