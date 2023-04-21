@@ -6,7 +6,7 @@
 
 Cassandra is a popular open-source database used by large enterprises such as [Netflix, Apple, and eBay](https://cassandra.apache.org/_/case-studies.html). While it may be assumed that the documentation regarding Cassandra's consistency guarantees is comprehensive and thoroughly tested, our research shows that this is not always the case. Therefore, we conducted an assessment of some of Cassandra's consistency [guarantees](https://cassandra.apache.org/doc/latest/cassandra/architecture/guarantees.html) to validate them.
 
-Cassandra is an AP system that prioritizes availability and partition tolerance over consistency, which means it only guarantees eventual consistency. Nevertheless, Cassandra offers tunable consistency which allows developers to adjust consistency levels according to their application needs. Using tunable consistency, the documentation states that "strong consistency" can be achieved when read and write consistency levels are chosen such that the replica sets overlap. Specifically, this is achieved when $R + W \gt RF$, where $R$ is the consistency level for read operations, $W$ is the consistency level for write operations, and $RF$ is the replication factor. ["Strong consistency"](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html#tunable-consistency) defined by Cassandra ensures that every read operation returns the most recent write value, and is in other words not the same as linearizability. However, it is unclear whether "strong consistency" is guaranteed during failures, such as node failures or network partitions. Therefore, our first test aims to verify the "strong consistency" guarantee under failure scenarios.
+Cassandra is an AP system that prioritizes availability and partition tolerance over consistency, which means it only guarantees eventual consistency. Nevertheless, Cassandra offers [tunable consistency](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html#tunable-consistency) which allows developers to adjust consistency levels according to their application needs. Using tunable consistency, the documentation states that "strong consistency" can be achieved when read and write consistency levels are chosen such that the replica sets overlap. Specifically, this is achieved when $R + W \gt RF$, where $R$ is the consistency level for read operations, $W$ is the consistency level for write operations, and $RF$ is the replication factor. "Strong consistency" defined by Cassandra ensures that every read operation returns the most recent write value, and is in other words not the same as linearizability. However, it is unclear whether "strong consistency" is guaranteed during failures, such as node failures or network partitions. Therefore, our first test verifies whether any writes can be lost when $R + W \gt RF$.
 
 If linearizable consistency is required, Cassandra offers Lightweight Transactions (LWTs) that guarantee linearizability on single partitions. For LWTs we want to see if this guarantee still holds when some program variables like the read consistency change, and if they hold under different types of network failures, as those two things are not explained in the documentation. 
 
@@ -109,11 +109,11 @@ Cassandra does not provide isolation in batches when data is located at multiple
 ### Results
 
 The results of the two configurations are as follows:
-(needs image)
+![im1](images/config_1.png)
 
 This is to be expected since with this configuration Cassandra does not provide isolation. This means that a read can happen when a counter batch is only halfway in progress, resulting in reading an inconsistent state. However, the last read of the database reads as shown below:
 
-(needs image)
+![im2](images/read_ok.png)
 
 Here all the accounts sum to 80 total again. This gives a good example of Cassandra's eventual consistency at play. 
 
@@ -121,7 +121,7 @@ Here all the accounts sum to 80 total again. This gives a good example of Cassan
 
 As expected all the reads observe a consistent state of the database. Jepsen outputs:
 
-(needs image)
+![im3](images/looking_good.png)
 
 We verify that the counter batch operates in atomicity and isolation as promised by Cassandra.
 
