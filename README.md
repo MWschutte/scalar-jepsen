@@ -14,9 +14,9 @@ $ docker-compose up -d
 $ docker exec -it jepsen-control bash
 ```
 4. Run a test
-``` bash
-cd /scalar-jepsen/cassandra
-lein run test --test lwt --ssh-private-key ~/.ssh/id_rsa
+```
+# cd /scalar-jepsen/cassandra
+# lein run test --test lwt --ssh-private-key ~/.ssh/id_rsa
 ```
   - Check README in each test for more detail
   - `--ssh-private-key` should be always set to specify the SSH key
@@ -48,11 +48,23 @@ $ sudo sh -c "cat << EOF >> /etc/hosts
 <NODE4_IP> n4
 <NODE5_IP> n5
 EOF"
-```
+``
 
 7. Run a test on the control machine
 
+possible command options commands
+  nemesis
+    none
+    flush
+    bridge
+    halves
+    isolation
+    crash
+
 ```sh
 $ cd ${SCALAR_JEPSEN}/cassandra
+
 $ lein run test --test lwt --ssh-private-key ~/.ssh/id_rsa
+
+$ lein run test --test lwt --nemesis crash --ssh-private-key ~/.ssh/id_rsa
 ```
