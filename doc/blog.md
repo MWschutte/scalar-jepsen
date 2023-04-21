@@ -61,7 +61,7 @@ In the table below X means that no nemesis was active during the test.
 | Quorum | Crash | 0 | 4353| 4380|
 |  Once |   Crash | 0 | 5990 | 5995 |
 
-As we can see even with a nemesis active we still find no writes being lost. Thus we can assume that the guarantee holds.
+As we can see even with a nemesis active we still find no writes being lost which seems to imply that indeed no writes can be lost if the condition is met.
 
 ## Test 2 - Testing LWTs for linearizability
 
