@@ -1,6 +1,7 @@
 (ns cassandra.lwt
   (:require [cassandra.core :refer :all]
             [cassandra.conductors :as conductors]
+            [cassandra.nemesis :as nemesis]
             [clojure.tools.logging :refer [debug info warn]]
             [jepsen
              [checker :as checker]
@@ -93,18 +94,22 @@
                                       (checker/compose
                                        {:timeline (timeline/html)
                                         :linear (checker/linearizable
-                                                 {:model (model/cas-register)})}))
-                          :generator (->> (independent/concurrent-generator
-                                           (:concurrency opts)
-                                           (range)
-                                           (fn [_]
-                                             (->> (gen/reserve
-                                                    (quot (:concurrency opts) 2)
-                                                    r
-                                                    (gen/mix [w cas cas]))
-                                                  (gen/limit 100)
-                                                  (gen/process-limit (:concurrency opts)))))
+                                                 {:model (model/cas-register)})
+                                        }))
+                                        :generator (->> 
+                                          (independent/concurrent-generator
+                                            (:concurrency opts)
+                                            (range)
+                                            (fn [_]
+                                              (->> 
+                                                (gen/repeat(gen/mix [r w r cas r]))
+                                                (gen/limit 1)
+                                                (gen/process-limit (:concurrency opts)))))
                                           (gen/nemesis
-                                           (conductors/mix-failure-seq opts))
-                                          (gen/time-limit (:time-limit opts)))})
-         opts))
+                                            (cycle [(gen/sleep 5)
+                                              {:type :info, :f :start}
+                                              (gen/sleep 5)
+                                              {:type :info, :f :stop}]))
+                                          (gen/time-limit (:time-limit opts))
+                                        )})
+    opts))

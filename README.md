@@ -1,5 +1,12 @@
 [![CircleCI](https://circleci.com/gh/scalar-labs/scalar-jepsen/tree/master.svg?style=svg)](https://circleci.com/gh/scalar-labs/scalar-jepsen/tree/master)
 
+A fork of the [Scalar/Jepsen](https://github.com/scalar-labs/scalar-jepsen) repository.
+
+*By [Casper Henkes](https://github.com/),
+[Marcus Schutte](https://github.com/),
+[Emilia Rieschel](https://github.com/rieschel).*
+
+
 # Run tests with Jepsen Docker
 1. Move to the docker directory
 ```sh
@@ -48,11 +55,23 @@ $ sudo sh -c "cat << EOF >> /etc/hosts
 <NODE4_IP> n4
 <NODE5_IP> n5
 EOF"
-```
+``
 
 7. Run a test on the control machine
 
+possible command options commands
+  nemesis
+    none
+    flush
+    bridge
+    halves
+    isolation
+    crash
+
 ```sh
 $ cd ${SCALAR_JEPSEN}/cassandra
+
 $ lein run test --test lwt --ssh-private-key ~/.ssh/id_rsa
+
+$ lein run test --test lwt --nemesis crash --ssh-private-key ~/.ssh/id_rsa
 ```
