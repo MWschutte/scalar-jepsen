@@ -1,6 +1,10 @@
 # Cassandra tests with Jepsen
 
-This is based on [riptano's jepsen](https://github.com/riptano/jepsen/tree/cassandra/cassandra).
+A fork of [Scalar/Jepsen](https://github.com/scalar-labs/scalar-jepsen) that is based on [riptano's jepsen](https://github.com/riptano/jepsen/tree/cassandra/cassandra).
+
+*By [Casper Henkes](https://github.com/),
+[Marcus Schutte](https://github.com/),
+[Emilia Rieschel](https://github.com/rieschel).*
 
 ## Current status
 - Supports Apache Cassandra 3.11.14

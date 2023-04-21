@@ -1,5 +1,12 @@
 [![CircleCI](https://circleci.com/gh/scalar-labs/scalar-jepsen/tree/master.svg?style=svg)](https://circleci.com/gh/scalar-labs/scalar-jepsen/tree/master)
 
+A fork of the [Scalar/Jepsen](https://github.com/scalar-labs/scalar-jepsen) repository.
+
+*By [Casper Henkes](https://github.com/),
+[Marcus Schutte](https://github.com/),
+[Emilia Rieschel](https://github.com/rieschel).*
+
+
 # Run tests with Jepsen Docker
 1. Move to the docker directory
 ```sh
