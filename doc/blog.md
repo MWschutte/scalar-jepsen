@@ -6,9 +6,9 @@
 
 Cassandra is a popular open-source database used by large enterprises such as [Netflix, Apple, and eBay](https://cassandra.apache.org/_/case-studies.html). While it may be assumed that the documentation regarding Cassandra's consistency guarantees is comprehensive and thoroughly tested, our research shows that this is not always the case. Therefore, we conducted an assessment of some of Cassandra's consistency [guarantees](https://cassandra.apache.org/doc/latest/cassandra/architecture/guarantees.html) to validate them.
 
-Cassandra is an AP system that prioritizes availability and partition tolerance over consistency, which means it only guarantees eventual consistency. Nevertheless, Cassandra offers [tunable consistency](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html#tunable-consistency) which allows developers to adjust consistency levels according to their application needs. Using tunable consistency, the documentation states that "strong consistency" can be achieved when read and write consistency levels are chosen such that the replica sets overlap. Specifically, this is achieved when $R + W \gt RF$, where $R$ is the consistency level for read operations, $W$ is the consistency level for write operations, and $RF$ is the replication factor. "Strong consistency" defined by Cassandra ensures that every read operation returns the most recent write value, and is in other words not the same as linearizability. However, it is unclear whether "strong consistency" is guaranteed during failures, such as node failures or network partitions. Therefore, our first test verifies whether any writes can be lost when $R + W \gt RF$.
+Cassandra is an AP system that prioritizes availability and partition tolerance over consistency, which means it only guarantees eventual consistency. Nevertheless, Cassandra offers [tunable consistency](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html#tunable-consistency) which allows developers to adjust consistency levels according to their application needs. Using tunable consistency, the documentation states that "strong consistency" can be achieved when read and write consistency levels are chosen such that the replica sets overlap. Specifically, this is achieved when $R + W \gt RF$, where $R$ is the consistency level for read operations, $W$ is the consistency level for write operations, and $RF$ is the replication factor. "Strong consistency" defined by Cassandra ensures that every read operation returns the most recent write value, and is in other words not the same as linearizability. We expect that the guarantee also implies that no writes can be lost during the test, and therefore, our first test verifies whether any writes can be lost when $R + W \gt RF$.
 
-If linearizable consistency is required, Cassandra offers Lightweight Transactions (LWTs) that guarantee linearizability on single partitions. For LWTs we want to see if this guarantee still holds when some program variables like the read consistency change, and if they hold under different types of network failures, as those two things are not explained in the documentation. 
+If linearizable consistency is required, Cassandra offers Lightweight Transactions (LWTs) that guarantee linearizability on single [partitions](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html#dataset-partitioning-consistent-hashing). For LWTs we want to see if this guarantee still holds when some program variables like the read consistency change, and if they hold under different types of network failures, as those two things are not explained in the documentation. 
 
 Finally, one of the most challenging transactional tests to achieve is a bank transaction where no money can be lost during the transaction. Cassandra does not guarantee serializability, also not with the LWTs since they only guarantee linearizability over a single partition. However, Cassandra provides atomicity and isolation with the batch operation. Therefore, our third test will aim to explore if the batch operation would ensure the atomicity and isolation needed to perform a bank transaction.
 
@@ -38,7 +38,7 @@ Finally, Cassandra offers the tunable consistency to balance consistency and ava
 
 - Low consistency levels: For example if setting read consistency level to ONE, two read queries can give different data if one node has the latest write and the other one has not received it yet. 
 
-## Test 1 - Testing the "strong consistency" guarantee during node failure
+## Test 1 - Testing if $R + W \gt RF$ guarantees no writes are lost
 
 This test verifies if every read reads the most recent write when $R + W \gt RF$. We do this by verifying if any updates are lost when apppending items to a list. We expect that all reads will read the most up to date value and that none are lost. And by only appending to a list we can easily verify if any updates are lost.
 
@@ -48,7 +48,7 @@ For the nemesis we used the Crash nemesis that simulates node failure.
 
 ### Results
 
-In the table below no nemesis was active.
+In the table below X means that no nemesis was active during the test.
 
 | Write consistency  | Nemesis |lost count |Acknowledged count | Attempt count|
 | ------------- | ------------- | ------------- | ------------- |------------- |
@@ -56,6 +56,8 @@ In the table below no nemesis was active.
 |  Once |   X | 0 | 16038| 16038 |
 | Quorum | Crash | 0 | 4353| 4380|
 |  Once |   Crash | 0 | 5990 | 5995 |
+
+As we can see even with a nemesis active we still find no writes being lost. Thus we can assume that the guarantee holds.
 
 ## Test 2 - Testing LWTs for linearizability
 
@@ -109,6 +111,7 @@ Cassandra does not provide isolation in batches when data is located at multiple
 ### Results
 
 The results of the two configurations are as follows:
+
 ![im1](images/config_1.png)
 
 This is to be expected since with this configuration Cassandra does not provide isolation. This means that a read can happen when a counter batch is only halfway in progress, resulting in reading an inconsistent state. However, the last read of the database reads as shown below:
@@ -129,10 +132,11 @@ Introducing nemesis to Configuration 2
 
 Let's see if the batch counter keeps its atomicity when we introduce failure into the system.
 In the picture below a latency plot of the bank, transactions are shown for when crash nemesis was added to the test. Although it results in more transfers failing, there are no exceptions thrown. Similar results are observed for the bridge nemesis.
+
 ![bank set crash](https://github.com/MWschutte/scalar-jepsen/blob/blog_post/doc/latency-raw-bank-set-crash-bootstrap.png?raw=true)
 
 ## Conclusion
 
-Our results show that Cassandra is able to uphold its guarantees, including both lightweight transactions and batch operations which performed as expected. While our results alone do not prove the guarantees, they do suggest that users of Cassandra can have confidence in the guarantees provided in the documentation. However, it is important to note that Cassandra is an AP system, and as such, both lightweight transactions and stronger transactional guarantees only apply to single partitions and not multiple partitions. Therefore, while Cassandra is an excellent choice for applications prioritizing availability and scalability, other options may be more suitable for those prioritizing consistency.
+Our results show that Cassandra is able to uphold its guarantees, including both lightweight transactions and batch operations which performed as expected and that $R + W \gt RF$ seems to quarantee that no writes are lost. While our results alone do not prove the guarantees, they do suggest that users of Cassandra can have confidence in the guarantees provided in the documentation. However, it is important to note that Cassandra is an AP system, and as such, both lightweight transactions and stronger transactional guarantees only apply to single partitions and not multiple partitions. Therefore, while Cassandra is an excellent choice for applications prioritizing availability and scalability, other options may be more suitable for those prioritizing consistency.
 
-To extend the work we could perform the tests on newer versions of Cassandra, e.g. 4.0. Additionally, we could further investigate the transactional guarantees of Cassandra, for example by testing the lightweight transactions with the [Gretchen](https://github.com/aphyr/gretchen) checker, which checks for serializability.
+To extend the work we could perform the tests on newer versions of Cassandra, e.g. 4.X. Additionally, we could further investigate the transactional guarantees of Cassandra, for example by testing the lightweight transactions with the [Gretchen](https://github.com/aphyr/gretchen) checker, which checks for serializability.
