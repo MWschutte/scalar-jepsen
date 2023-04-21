@@ -7,7 +7,8 @@
              [core       :as cassandra]
              [counter    :as counter]
              [lwt        :as lwt]
-             [nemesis    :as can]]
+             [nemesis    :as can]
+             [listset    :as listset]]
             [cassandra.collections.map :as map]
             [cassandra.collections.set :as set]
             [jepsen
@@ -25,7 +26,8 @@
    "map"     map/map-test
    "set"     set/set-test
    "counter" counter/cnt-inc-test
-   "lwt"     lwt/lwt-test})
+   "lwt"     lwt/lwt-test
+   "listset"     listset/set-test})
 
 (def nemeses
   {"none"      `(can/none)
