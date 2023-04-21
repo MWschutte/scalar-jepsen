@@ -20,7 +20,11 @@ Our GitHub repository is forked from [Scalar-labs's repository](https://github.c
 
 In this project we have used the testing framework [Jepsen](https://github.com/jepsen-io/jepsen). Jepsen is a testing tool created by Kyle Kingsbury to analyze the consistency and reliability of distributed databases under various failure scenarios. Jepsen works by subjecting the database system to a series of tests that simulate real-world network and hardware failures, such as node crashes, network partitions, and message loss. There are other tools we could have used to test Cassandra's consistency, for example [Cassandra's stress testing tool](https://cassandra.apache.org/doc/latest/cassandra/tools/cassandra_stress.html). However, that tool is more specialized in testing benchmarking performance or identifying system bottlenecks, while Jepsen is specialized in testing consistency guarantees. 
 
-Jepsen tests generate histories, and checkers are then used to verify the correctness of the histories against a formal model of the expected behavior. In our project, we used the [Knossos checker](https://github.com/jepsen-io/knossos), which implements the [Wing and Gong](https://doi.org/10.1006/jpdc.1993.1015)  linearizability checker, to test for linearizable consistency. Although [Porcupine](https://github.com/anishathalye/porcupine) is another checker that could be used for testing linearizability, we chose Knossos because previous Cassandra testing had been performed using it and because it is easily integrated with Jepsen. We also adapted some of the checkers found in the Jepsen GitHub repository for our strong consistency test and bank transaction test.
+Jepsen tests generate histories, and checkers are then used to verify the correctness of the histories against a formal model of the expected behavior. In our project, we used the [Knossos checker](https://github.com/jepsen-io/knossos), which implements the [Wing and Gong](https://doi.org/10.1006/jpdc.1993.1015)  linearizability checker, to test for linearizable consistency. Although [Porcupine](https://github.com/anishathalye/porcupine) is another checker that could be used for testing linearizability, we chose Knossos because previous Cassandra testing had been performed using it and because it is easily integrated with Jepsen. We also adapted some of the checkers found in the Jepsen GitHub repository for our first and third tests.
+
+### Nemesis
+
+The nemesis we chose to use for our tests are: Crash, which ‘crashes’ a node, stopping it and restarting it later also wiping its data. Bridge, where the network is partitioned into two halves of two nodes where both halves can communicate with the fifth bridge node, and Halves: which partitions the nodes into two subnetworks of size three and two.
 
 ### Nondeterminism:
 
@@ -43,7 +47,7 @@ Finally, Cassandra offers the tunable consistency to balance consistency and ava
 This test verifies if every read reads the most recent write when $R + W \gt RF$. We do this by verifying if any updates are lost when apppending items to a list. We expect that all reads will read the most up to date value and that none are lost. And by only appending to a list we can easily verify if any updates are lost.
 
 ### Test setup
-This test detects lost writes. It uses a list datatype. All transactions are appended to list or read operations. Different read/write consistency levels are configured such that the number of reads $R$ or the number of writes $W$ is larger than the replication factor $RF$:
+This test detects lost writes. It uses a list datatype. All transactions are appended to list or read operations. Different read/write consistency levels are configured such that the number of reads $R$ plus the number of writes $W$ is larger than the replication factor $RF$:
 For the nemesis we used the Crash nemesis that simulates node failure.
 
 ### Results
@@ -64,7 +68,7 @@ As we can see even with a nemesis active we still find no writes being lost. Thu
 LWTs are guaranteed to be linearizable if performed on a single partition without any non-LTWs happening. To test this claim we will test two different scenarios. First off we will change the read-consistency to be not serial. The documentation states that the serial read-consistency should be used with LWTs so by changing this we expect the resulting history to not always be linearizable. Secondly, we introduce different nemesis into the system to see if the linearizability guarantee still holds with network failures.
 
 ### Test setup
-This test uses the 5 nodes from our general test setup. A generator then generates a random operation, which is either a Read, a Write, or a Compare And Swap (CAS) operation, on a random node. Here reads are roughly three times as likely as write and CAS operations. There is also a nemesis generator in the test. If a nemesis is active then it will activate the nemesis on a random node with a five second active five second passive timeline.The nemesis we chose to use for this test are: Crash, which ‘crashes’ a node, stopping it and restarting it later also wiping its data. Bridge, where the network is partitioned into two halves of two nodes where both halves can communicate with the fifth bridge node, and Halves: which partitions the nodes into two subnetworks of size three and two.
+This test uses the 5 nodes from our general test setup. A generator then generates a random operation, which is either a Read, a Write, or a Compare And Swap (CAS) operation, on a random node. Here reads are roughly three times as likely as write and CAS operations. There is also a nemesis generator in the test. If a nemesis is active then it will activate the nemesis on a random node with a five second active five second passive timeline. The nemesis we chose to use for this test are: Crash, which ‘crashes’ a node, stopping it and restarting it later also wiping its data. Bridge, where the network is partitioned into two halves of two nodes where both halves can communicate with the fifth bridge node, and Halves: which partitions the nodes into two subnetworks of size three and two.
 
 ### Results
 
@@ -112,26 +116,43 @@ Cassandra does not provide isolation in batches when data is located at multiple
 
 The results of the two configurations are as follows:
 
-![im1](images/config_1.png)
+#### **Configuration 1: Bank accounts on multiple partitions**
+
+```clojure
+{:type :wrong-total,
+    :expected 80,
+    :found 85,
+    :op
+    {:type :ok,
+     :f :read,
+     :time 69465289700,
+     :process 0,
+     :value [101 -26 145 80 134 -116 -44 -189],
+     :index 21471}}
+```
 
 This is to be expected since with this configuration Cassandra does not provide isolation. This means that a read can happen when a counter batch is only halfway in progress, resulting in reading an inconsistent state. However, the last read of the database reads as shown below:
 
-![im2](images/read_ok.png)
+```
+2	:ok	:read	[-246 -236 -87 153 393 -74 -73 250]
+```
 
-Here all the accounts sum to 80 total again. This gives a good example of Cassandra's eventual consistency at play. 
+Here all the accounts sum to 80 total again. This gives a good example of Cassandra's eventual consistency at play.
 
-#### **Configuration 2:  All Bank accounts on one partition**
+#### **Configuration 2: All Bank accounts on one partition**
 
 As expected all the reads observe a consistent state of the database. Jepsen outputs:
 
-![im3](images/looking_good.png)
+```
+Everything looks good! ヽ(‘ー`)ノ
+```
 
 We verify that the counter batch operates in atomicity and isolation as promised by Cassandra.
 
-Introducing nemesis to Configuration 2
+#### **Introducing nemesis to Configuration 2**
 
 Let's see if the batch counter keeps its atomicity when we introduce failure into the system.
-In the picture below a latency plot of the bank, transactions are shown for when crash nemesis was added to the test. Although it results in more transfers failing, there are no exceptions thrown. Similar results are observed for the bridge nemesis.
+In the picture below a latency plot of the bank transactions are shown for when crash nemesis was added to the test. Although it results in more transfers failing, there are no exceptions thrown. Similar results are observed for the bridge nemesis.
 
 ![bank set crash](https://github.com/MWschutte/scalar-jepsen/blob/blog_post/doc/latency-raw-bank-set-crash-bootstrap.png?raw=true)
 
