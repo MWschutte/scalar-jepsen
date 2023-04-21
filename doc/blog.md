@@ -4,94 +4,120 @@
 [Marcus Schutte](https://github.com/),
 [Emilia Rieschel](https://github.com/rieschel).*
 
-Cassandra is a popular open-source database used by large enterprises such as Netflix, Apple, and eBay. While it may be assumed that the documentation regarding Cassandra's consistency guarantees is comprehensive and thoroughly tested, our research shows that this is not always the case. Therefore, we conducted an in-depth assessment of Cassandra's consistency guarantees to validate them.
+Cassandra is a popular open-source database used by large enterprises such as [Netflix, Apple, and eBay](https://cassandra.apache.org/_/case-studies.html). While it may be assumed that the documentation regarding Cassandra's consistency guarantees is comprehensive and thoroughly tested, our research shows that this is not always the case. Therefore, we conducted an assessment of some of Cassandra's consistency [guarantees](https://cassandra.apache.org/doc/latest/cassandra/architecture/guarantees.html) to validate them.
 
-Regarding the CAP theorem, Cassandra is an AP system, which means it prioritizes availability and partition tolerance over consistency. Cassandra is therefore only guaranteeing eventual consistency. However, Cassandra allows developers to tune consistency levels to match the needs of their applications. Additionally, the documentation claims that "strong consistency" can be achieved when R + W > RF, where R = Consistency level for read operations, W = Consistency level for write operations, and RF = Replication factor. "Strong consistency" defined by Cassandra ensures that every read operation returns the most recent write value, and is in other words not the same as linearizability. However, it is unclear from Cassandra's documentation whether "strong consistency" (every read operation returns the most recent write) is guaranteed during failures, such as node failures or network partitions. Therefore, our first test will focus on testing "strong consistency" guarantees during failure scenarios.
+Cassandra is an AP system that prioritizes availability and partition tolerance over consistency, which means it only guarantees eventual consistency. Nevertheless, Cassandra offers [tunable consistency](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html#tunable-consistency) which allows developers to adjust consistency levels according to their application needs. Using tunable consistency, the documentation states that "strong consistency" can be achieved when read and write consistency levels are chosen such that the replica sets overlap. Specifically, this is achieved when $R + W \gt RF$, where $R$ is the consistency level for read operations, $W$ is the consistency level for write operations, and $RF$ is the replication factor. "Strong consistency" defined by Cassandra ensures that every read operation returns the most recent write value, and is in other words not the same as linearizability. We expect that the guarantee also implies that no writes can be lost during the test, and therefore, our first test verifies whether any writes can be lost when $R + W \gt RF$.
 
-If linearizable consistency is required, Cassandra offers Lightweight Transactions (LWTs) that guarantee linearizability on single partitions. However, when using LWTs, the documentation specifies that you must use the read consistency level serial. Unfortunately, the documentation does not provide a clear explanation as to why the serial read consistency level is necessary. Hence, our second test aims to determine what happens when other read consistency levels are used while performing lightweight transactions.
+If linearizable consistency is required, Cassandra offers Lightweight Transactions (LWTs) that guarantee linearizability on single [partitions](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html#dataset-partitioning-consistent-hashing). For LWTs we want to see if this guarantee still holds when some program variables like the read consistency change, and if they hold under different types of network failures, as those two things are not explained in the documentation. 
 
-Finally, one of the most challenging consistency and isolation tests to achieve is a bank transaction where no money can be lost during the transaction. Therefore, our third test focuses on whether Cassandra's transactional guarantees are sufficient to perform bank transactions.
-
-# Test setup
-
-Our Github repository is forked from [Scalar-labs's repository](https://github.com/scalar-labs/scalar-jepsen). A test cluster is set up with 5 docker containers and 1 control docker container. The machines run Ubuntu 20.04. Cassandra version 3.11 is used. See the README.md in our Github repository for a detailed explanation of the setup. 
-
-## Jepsen
-
-In this project we have used the testing framework [Jepsen](https://github.com/jepsen-io/jepsen). Jepsen is a testing tool created by Kyle Kingsbury to analyze the consistency and reliability of distributed databases under various failure scenarios. Jepsen works by subjecting the database system to a series of tests that simulate real-world network and hardware failures, such as node crashes, network partitions, and message loss. There are other tools we could have used to test Cassandra's consistency, for example [Cassandra's stress testing tool](https://cassandra.apache.org/doc/latest/cassandra/tools/cassandra_stress.html). However, that tool is more specialized in testing benchmarking performance or identifying system bottlenecks, while Jepsen is specialized on testing consistency guarantees. 
-
-Jepsen tests generate histories, and checkers are then used to verify the correctness of the histories against a formal model of the expected behaviour. In our project, we used the [Knossos checker](https://github.com/jepsen-io/knossos), which implements the [Wing and Gong](https://doi.org/10.1006/jpdc.1993.1015)  linearizability checker, to test for linearizable consistency. Although [Porcupine](https://github.com/anishathalye/porcupine) is another checker that could be used for testing linearizability, we chose Knossos because previous Cassandra testing had been performed using it and because it is easily integrated with Jepsen. We also adapted some of the checkers found in the Jepsen Github repository for our strong consistency test and bank transaction test.
-
-# Nondeternism
-*Change the following (and add more details + double check if everything is correct) depending on exactly what we are testing*
-
-Since Cassandra is a distributed system that prioritizes availability and partition tolerance over consistency, there are several factors that can cause nondeternism to our tests. First of all, we are inserting faults during the tests and have used both network partitioning and temporarily suspending nodes.
-
-- Network partitioning: When partioning the network into two subclusters, inconsistencies between the clusters can happen. For example, if a write happens in one of the subclusters, the other subcluster will not have the latest write. This means, if we perform a read, we won't know if it will get the most recent data or not. (TODO: look into hinted handoff, because apparently Cassandra is using the to handle writes that occur during network partitions. However, Cassandra should not have anything that handle reads during network partitions as I have understood it)
-
-- Temporarily suspending nodes: The effects of suspending the nodes will depend, but can cause nondeternism if it disrupts the replication phase. For example, if a write request is made to a suspended node the data will not be propagated to the other nodes until the node is brought back online. In the meantime, a read request may be made to the other nodes, and it may then return an outdated version of the data that does not reflect the changes made to the suspended node. But if the node was suspended after that the data was replicated to all the nodes, the read would return the most recent write data. 
-
-Secondly, not only inserting faults in the tests can cause nondeternism, but also Cassandra by design. For example, Cassandra's conflict handling can cause nondeternism during concurrent writes:
-
-- Concurrent writes without using lwt: Concurrent writes in Cassandra can cause nondeterminism because multiple clients can simultaneously issue write requests to update the same data row with different values, and it's not guaranteed which write request will be applied first. Additionally, the writes could have the same timestamp, and then the lexically bigger value will be chosen.
-
-Finally, Cassandra offers the tunable consistency to balance between consistency and availability. If availability is prioritized by using low conistency levels or low replication factor, this can resuls in nondeternism:
-
-- Low consistency levels: For example if setting read consistency level to ONE, two read queries can give different data if one node has the latest write and the other one has not received it yet. 
-
-- Low replication factor: For example if RF is set to 1, and the node with the data becomes unavailable somehow in one read query, two read queries for the same data could give back different results.
-
-# Testing the "strong consistency" guarantee during node failure
-*Discuss together exactly what we want to test here*
-
-> **TODO - Tests:**
-> - Verfiying strong consistency during node failure - probably we should be able to find inconsistency (in this article they show examples of when strong consistency do not hold https://blog.scottlogic.com/2017/10/06/cassandra-eventual-consistency.html)
-> - Maybe test with other nemesesis as well? 
-> - Maybe also test with Knossos and see what it is that fails. Probably however it will only show that some updates are lost, at least this was found by Kyle's tests.
-
-> **TODO - Discuss results:**
-> - Create a diagram showing what happens during the tests, and why we can get inconsistencies during node failure (if we got some)
-> - Maybe show the histories if possible
-> - NON-DETERNISM: probably enough with just discussing causes for the inconsistencies we see? Also, explain why last write wins policy can cause lost updates (no isolation), and reference to Kyle's testing.
-
-# Testing LWT's for linearizability using different read consistency levels
-Cassandra offers the following consistency levels: ANY, ONE, TWO, THREE, QUORUM, Serial (only for read consistency).
-
-> **TODO - Tests:**
-> - Testing LWTs for linearizability when having different read consistency levels (we could compare this with earlier work of Datastax and Kyle, where they only tested the linearizability of LWT but not the implementation of the LWT)
-> - We can also just test the guarantee of LWTs fulfilling linearizability (very basic test but still a bit interesting for the report). If we do it, we can then also compare it to Kyle's testing in 2013. In thas case, we could write something like:
->
->As said, LWTs are guaranteed to achieve linearizability, meaning that sequential consistency is achieved with a time-constraint. This guarantee was tested by [Kyle Kingsbury in 2013](https://aphyr.com/posts/294-call-me-maybe-cassandra). At that time, LWT were a new feature of Cassandra 2.0.0, and several issues were found by Kyle. Among others, it was found that 1-5% of the acknowledged writes were dropped, and the cause seemed to be a broken implementation of Paxos. 
->
->Since we are running our tests on Cassandra 3.11 it would be interesting to see if the issues found 2013 are now resolved, and if we can find other issues with the LWT as well.
->
->We tested this by ... 
-
-> **TODO - Discuss results:**
-> - Maybe create a table showing for which consistency levels we found issues
-> - Try to explain what this issues can be causes by, among others explain why LWT need serial consistency 
-> - NON-DETERNISM: What happens during node failure in the LWT transactions? What is the cause to why we find issues in the tests sometimes for some consistency levels but not always?
-
-# Testing atomicity and isolation in the bank transaction scenario
-Cassandra gives no linearizability/serializability guarantees except for in the lightweight transactions. However, lightweight transactions are only supported within a row. But cassandra does guarentee "strong consistency" in terms of the CAP theorem and it provides atomicity and isolation with batched transactions. 
-With these building blocks we try to implement bank transactions. (TODO: not relevant to mention CAP theorem?)
-
-## Requirements.
-We use the cassandra [counter](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/counter_type.html#:~:text=Counter%20type-,A%20counter%20column%20value%20is%20a%2064%2Dbit%20signed%20integer,two%20operations%3A%20increment%20and%20decrement.) data type to represent the bank account. This allows us to increment and decrement the bank account value. We use cassandra [counter batch](https://docs.datastax.com/en/cql-oss/3.x/cql/cql_reference/cqlBatch.html) since it guarantees atomicity and isolation within a single partition. Ideally, we would use lightweight transactions to make sure bank account values remain positive, but counter batches are [idempotent](https://cassandra.apache.org/doc/latest/cassandra/cql/dml.html#counter-batches), and [lightweight transactions do not suppport idempotent data types](https://docs.datastax.com/en/developer/java-driver/3.1/manual/idempotence/). Therefore, we drop the constraint that bank transactions have to be non-negative.
+Finally, one of the most challenging transactional tests to achieve is a bank transaction where no money can be lost during the transaction. Cassandra does not guarantee serializability, also not with the LWTs since they only guarantee linearizability over a single partition. However, Cassandra provides atomicity and isolation with the batch operation. Therefore, our third test will aim to explore if the batch operation would ensure the atomicity and isolation needed to perform a bank transaction.
 
 ## Test setup
-The workload consist of read operations, which read all bank accounts with consistency level ALL, and of counter batches, which transfer money from one account to another. The reads read the total state of the database. There are 8 accounts in total and they start with 10 credits in each account. The reads read the total state of the database and are expected to return a total amount of 80 credits summing the ammount in all accounts. After the transactions are done the test times out for 60 seconds and reads one more time to observe the final state. 
+
+Our GitHub repository is forked from [Scalar-labs's repository](https://github.com/scalar-labs/scalar-jepsen). A test cluster is set up with 5 Cassandra nodes and 1 Jepsen control node and a replication factor of three. The machines run Ubuntu 20.04. Cassandra version 3.11.14 is used. See the README.md in our GitHub repository for a detailed explanation of the setup.
+
+### Jepsen
+
+In this project we have used the testing framework [Jepsen](https://github.com/jepsen-io/jepsen). Jepsen is a testing tool created by Kyle Kingsbury to analyze the consistency and reliability of distributed databases under various failure scenarios. Jepsen works by subjecting the database system to a series of tests that simulate real-world network and hardware failures, such as node crashes, network partitions, and message loss. There are other tools we could have used to test Cassandra's consistency, for example [Cassandra's stress testing tool](https://cassandra.apache.org/doc/latest/cassandra/tools/cassandra_stress.html). However, that tool is more specialized in testing benchmarking performance or identifying system bottlenecks, while Jepsen is specialized in testing consistency guarantees. 
+
+Jepsen tests generate histories, and checkers are then used to verify the correctness of the histories against a formal model of the expected behavior. In our project, we used the [Knossos checker](https://github.com/jepsen-io/knossos), which implements the [Wing and Gong](https://doi.org/10.1006/jpdc.1993.1015)  linearizability checker, to test for linearizable consistency. Although [Porcupine](https://github.com/anishathalye/porcupine) is another checker that could be used for testing linearizability, we chose Knossos because previous Cassandra testing had been performed using it and because it is easily integrated with Jepsen. We also adapted some of the checkers found in the Jepsen GitHub repository for our first and third tests.
+
+### Nemesis
+
+The nemesis we chose to use for our tests are: Crash, which ‘crashes’ a node, stopping it and restarting it later also wiping its data. Bridge, where the network is partitioned into two halves of two nodes where both halves can communicate with the fifth bridge node, and Halves: which partitions the nodes into two subnetworks of size three and two.
+
+### Nondeterminism:
+
+Since Cassandra is a distributed system that prioritizes availability and partition tolerance over consistency, there are several factors that can cause nondeterminism for our tests. First of all, we are inserting faults during the tests and have used both network partitioning and node failures.
+
+- Network partitioning: When dividing a network into two subclusters, inconsistencies may occur between the clusters. In our tests, we utilized two different partitioning techniques: bridge and halves. The bridge partition separates our 5-node cluster into two subclusters, each consisting of 3 nodes, with one node overlapping in both subclusters. The halves partition splits our 5-node cluster into two subclusters with 3 and 2 nodes, respectively. Within each subcluster, all nodes are fully connected with no network issues. However, between the two subclusters, existing connections are dropped, and no new connections can be established during the network partition. As Cassandra prioritizes availability, read and write operations are permitted during network partitions, which can result in nondeterministic outcomes. For instance, in a halves network partition, if a write operation takes place in one of the subclusters, the other subcluster will not have the latest write. Therefore, if we execute a read operation during the network partition, we cannot determine whether it will obtain the most recent data, since it may read from either of the two subclusters. In a bridge network partition, this can also happen if the data is not replicated to the bridge node. Despite the possibility of inconsistencies during network partitions, Cassandra implements a technique called hinted handoff to ensure that all nodes are synchronized once again after a network partition. This is accomplished by storing the missed write on the coordinator node when attempting to write to an unavailable node. Once the network partition is resolved, the stored missed updates are sent to the previously unavailable nodes.
+
+- Node failures: The effects of crashing the nodes will depend, but can cause nondeterminism if it disrupts the replication phase. For example, if a write request is made to a suspended node the data will not be propagated to the other nodes until the node is brought back online. In the meantime, a read request may be made to the other nodes, and it may then return an outdated version of the data that does not reflect the changes made to the suspended node. But if the node was suspended after that the data was replicated to all the nodes, the read would return the most recent write data. 
+
+Secondly, not only inserting faults in the tests can cause nondeterminism, but also Cassandra by design. For example, Cassandra's conflict handling can cause nondeterminism during concurrent writes:
+
+- Concurrent writes without using lightweight transactions: To handle concurrent writes, Cassandra uses timestamps and the last-write-wins policy. For each write, the client assigns a timestamp for the column value that is updated. If two writes try to update the same data at the same time, the write with the latest timestamp will be chosen according to the last-write-win policy. If both of the writes would have the exact same timestamp, which is unlikely, the lexically bigger value will be chosen. So far, Cassandra handles concurrent writes deterministically. However, nondeterminism can occur if the client clocks become out of sync, because then it is not sure which write will have the latest timestamp. 
+
+Finally, Cassandra offers the tunable consistency to balance consistency and availability. If availability is prioritized by using low consistency levels this can result in nondeterminism as reads might not read from the latest writes:
+
+- Low consistency levels: For example if setting read consistency level to ONE, two read queries can give different data if one node has the latest write and the other one has not received it yet. 
+
+## Test 1 - Testing if $R + W \gt RF$ guarantees no writes are lost
+
+This test verifies if every read reads the most recent write when $R + W \gt RF$. We do this by verifying if any updates are lost when apppending items to a list. We expect that all reads will read the most up to date value and that none are lost. And by only appending to a list we can easily verify if any updates are lost.
+
+### Test setup
+This test detects lost writes. It uses a list datatype. All transactions are appended to list or read operations. Different read/write consistency levels are configured such that the number of reads $R$ plus the number of writes $W$ is larger than the replication factor $RF$:
+For the nemesis we used the Crash nemesis that simulates node failure.
+
+### Results
+
+In the table below X means that no nemesis was active during the test.
+
+| Write consistency  | Nemesis |lost count |Acknowledged count | Attempt count|
+| ------------- | ------------- | ------------- | ------------- |------------- |
+| Quorum  | X | 0  | 17231| 17231 |
+|  Once |   X | 0 | 16038| 16038 |
+| Quorum | Crash | 0 | 4353| 4380|
+|  Once |   Crash | 0 | 5990 | 5995 |
+
+As we can see even with a nemesis active we still find no writes being lost which seems to imply that indeed no writes can be lost if the condition is met.
+
+## Test 2 - Testing LWTs for linearizability
+
+LWTs are guaranteed to be linearizable if performed on a single partition without any non-LTWs happening. To test this claim we will test two different scenarios. First off we will change the read-consistency to be not serial. The documentation states that the serial read-consistency should be used with LWTs so by changing this we expect the resulting history to not always be linearizable. Secondly, we introduce different nemesis into the system to see if the linearizability guarantee still holds with network failures.
+
+### Test setup
+This test uses the 5 nodes from our general test setup. A generator then generates a random operation, which is either a Read, a Write, or a Compare And Swap (CAS) operation, on a random node. Here reads are roughly three times as likely as write and CAS operations. There is also a nemesis generator in the test. If a nemesis is active then it will activate the nemesis on a random node with a five second active five second passive timeline. The nemesis we chose to use for this test are: Crash, which ‘crashes’ a node, stopping it and restarting it later also wiping its data. Bridge, where the network is partitioned into two halves of two nodes where both halves can communicate with the fifth bridge node, and Halves: which partitions the nodes into two subnetworks of size three and two.
+
+### Results
+
+#### **Read consistency**
+
+| Consistency | Result |
+| --- | --- |
+| SERIAL | pass |
+| ONE | fail |
+| TWO | pass |
+| QUORUM | pass |
+| ALL | pass |
+
+For the read consistency, we only observed failures for read-consistency level ONE. We hypothesize that if $R + W \le RF$ then it is possible to read an outdated value. This is not allowed in linearizability and so we can find errors here. We first expected that errors might also arise with read-consistency TWO, but if W for LWTs is two then $R + W \gt RF$ as $RF = 3$ in our test environment.
+
+#### **Nemesis**
+
+| Nemesis | Result |
+| --- | --- |
+| None | pass |
+| Crash | pass |
+| Halves | pass |
+| Bridge | pass |
+
+For the nemesis as is seen, all tests pass. This means that Cassandra's LWTs seem to be linearizable even with the tested network failures for the scenarios that we have tested. This does not prove linearizability but it is a good sign.
+
+## Test 3 - Testing atomicity and isolation of batch operations in the bank transaction scenario
+
+In this test we will perform bank transactions using the batch operation, and see if the batch operation achieves the atomicity and isolation it guarantees.
+
+### Requirements:
+
+We use the Cassandra counter data type to represent the bank account. This allows us to increment and decrement the bank account value. We use Cassandra counter batch since it guarantees atomicity and isolation within a single partition. Ideally, we would use lightweight transactions to make sure bank account values remain positive, but counter batches are idempotent, and lightweight transactions do not support idempotent data types. Therefore, we drop the constraint that bank transactions have to be non-negative.
+
+### Test setup
+
+The workload consists of read operations, which read all bank accounts with consistency level ALL, and counter batches, which transfer money from one account to another. The reads read the total state of the database. There are 8 accounts in total and they start with 10 credits in each account. The reads read the total state of the database and are expected to return a total amount of 80 credits summing the amount in all accounts. After the transactions are done the test times out for 60 seconds and reads one more time to observe the final state. 
 
 The bank transaction test are set up in two different ways:
 - Configuration 1: the bank accounts live on multiple partitions. 
 - Configuration 2: the bank accounts live on one partition. 
-Cassandra does not provide isolation in batches when data is located at muliple partitions. 
+Cassandra does not provide isolation in batches when data is located at multiple partitions. 
 
-## Results
+### Results
+
 The results of the two configurations are as follows:
 
-### Configuration 1: Bank accounts on multiple partitions
-Jepsen throws the following exception during evaluation:
+#### **Configuration 1: Bank accounts on multiple partitions**
+
 ```clojure
 {:type :wrong-total,
     :expected 80,
@@ -104,28 +130,34 @@ Jepsen throws the following exception during evaluation:
      :value [101 -26 145 80 134 -116 -44 -189],
      :index 21471}}
 ```
-This is to be expected since with this configuration Cassandra does not provide isolation. This means, that a read can happen when a counter batch is only half way in progress, resulting in reading an inconsistent state. However, the last read of the database reads as shown bellow:
+
+This is to be expected since with this configuration Cassandra does not provide isolation. This means that a read can happen when a counter batch is only halfway in progress, resulting in reading an inconsistent state. However, the last read of the database reads as shown below:
 
 ```
 2	:ok	:read	[-246 -236 -87 153 393 -74 -73 250]
 ```
-Here all the accounts sum to 80 total again. This gives a good example of Cassandras eventual consistency at play. (TODO: Is this an example of eventual consistency, or only example of atomicity and isolation?)
 
-### Configuration 2: All Bank accounts on one partition.
-As expected all the reads observe consistent state of the database. Jepsen outputs:
+Here all the accounts sum to 80 total again. This gives a good example of Cassandra's eventual consistency at play.
+
+#### **Configuration 2: All Bank accounts on one partition**
+
+As expected all the reads observe a consistent state of the database. Jepsen outputs:
+
 ```
 Everything looks good! ヽ(‘ー`)ノ
 ```
-We verify that the counter batch operates in atomicity and isolation as promised by cassandra.
 
-### Introducing nemesis to Configuration 2
-Lets see if the batch counter keeps its atomicity when we introduce failure into the system.
-In the picture below a latency plot of the bank transactions is shown for when crash nemesis was added to the test. Although it results in more transfers failing, there are no exceptions thrown. Similar results are observed for the bridge nemesis.
+We verify that the counter batch operates in atomicity and isolation as promised by Cassandra.
+
+#### **Introducing nemesis to Configuration 2**
+
+Let's see if the batch counter keeps its atomicity when we introduce failure into the system.
+In the picture below a latency plot of the bank transactions are shown for when crash nemesis was added to the test. Although it results in more transfers failing, there are no exceptions thrown. Similar results are observed for the bridge nemesis.
+
 ![bank set crash](https://github.com/MWschutte/scalar-jepsen/blob/blog_post/doc/latency-raw-bank-set-crash-bootstrap.png?raw=true)
 
-# Conclusion
-**TODO:**
-- Summarize results
-- Implications
+## Conclusion
 
-To extend the work we could perform the tests on newer versions of Cassandra, for example version 4.0. Additionally, we could further investigate the transactional guarantees of Cassandra, for example by testing the lightweight transaction for serializability. For such tests using the [Gretchen](https://github.com/aphyr/gretchen) checker would be relevant, which checks for serializability.
+Our results show that Cassandra is able to uphold its guarantees, including both lightweight transactions and batch operations which performed as expected and that $R + W \gt RF$ seems to quarantee that no writes are lost. While our results alone do not prove the guarantees, they do suggest that users of Cassandra can have confidence in the guarantees provided in the documentation. However, it is important to note that Cassandra is an AP system, and as such, both lightweight transactions and stronger transactional guarantees only apply to single partitions and not multiple partitions. Therefore, while Cassandra is an excellent choice for applications prioritizing availability and scalability, other options may be more suitable for those prioritizing consistency.
+
+To extend the work we could perform the tests on newer versions of Cassandra, e.g. 4.X. Additionally, we could further investigate the transactional guarantees of Cassandra, for example by testing the lightweight transactions with the [Gretchen](https://github.com/aphyr/gretchen) checker, which checks for serializability.
