@@ -40,15 +40,11 @@ Finally, Cassandra offers the tunable consistency to balance consistency and ava
 
 ## Test 1 - Testing the "strong consistency" guarantee during node failure
 
-This test verifies strong consistency of Cassandra as defined in the CAP theorem. I.e. every read receives the most recent write. 
+This test verifies if every read reads the most recent write when $R + W \gt RF$. We do this by verifying if any updates are lost when apppending items to a list. We expect that all reads will read the most up to date value and that none are lost. And by only appending to a list we can easily verify if any updates are lost.
 
 ### Test setup
-This test detects lost writes. It uses a list datatype. All transactions are appended to list or read operations. The cassandra cluster is configured with 5 nodes. Different read/write consistency levels are configured such that the number of reads $R$ or the number of writes $W$ is larger than the replication factor $RF$:
-
-$R + W \gt RF$
-
-When this is the case, according to the documentation, Cassandra provides strong consistency.
-For nemesis we used crash and network bridge.
+This test detects lost writes. It uses a list datatype. All transactions are appended to list or read operations. Different read/write consistency levels are configured such that the number of reads $R$ or the number of writes $W$ is larger than the replication factor $RF$:
+For the nemesis we used the Crash nemesis that simulates node failure.
 
 ### Results
 
@@ -121,7 +117,7 @@ This is to be expected since with this configuration Cassandra does not provide 
 
 Here all the accounts sum to 80 total again. This gives a good example of Cassandra's eventual consistency at play. 
 
-#### Configuration 2:  All Bank accounts on one partition
+#### **Configuration 2:  All Bank accounts on one partition**
 
 As expected all the reads observe a consistent state of the database. Jepsen outputs:
 
